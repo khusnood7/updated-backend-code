@@ -23,6 +23,14 @@ const OrderItemSchema = new mongoose.Schema(
       ref: 'Product',
       required: [true, 'Please add a product'],
     },
+    variant: {
+      type: String,
+      required: [true, 'Please add a variant'],
+    },
+    packaging: {
+      type: String,
+      required: [true, 'Please add a packaging'],
+    },
     quantity: {
       type: Number,
       required: [true, 'Please add quantity'],
@@ -75,12 +83,12 @@ const OrderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['card', 'upi'], // 'card' and 'upi' as payment methods
-      default: 'card',
+      enum: ['cod', 'cash_on_delivery', 'razorpay', 'card', 'upi', 'paypal', 'stripe'],
+      default: 'cod',
     },
     paymentStatus: {
       type: String,
-      enum: ['paid', 'pending', 'failed'],
+      enum: ['paid', 'pending', 'failed', 'refunded'],
       default: 'pending',
     },
     shippingAddress: { type: AddressSchema, required: true },
@@ -119,26 +127,18 @@ OrderSchema.virtual('finalAmount').get(function () {
 });
 
 // Method to calculate the total amount before saving
-// Example of calculateTotal in the Order model
 OrderSchema.methods.calculateTotal = function () {
   this.totalAmount = this.items.reduce((acc, item) => {
     // Ensure item.price is a valid number
-    if (!item.price || isNaN(item.price)) {
+    if (item.price == null || isNaN(item.price)) {
       throw new Error('Invalid price in order item');
     }
     return acc + item.price * item.quantity;
   }, 0);
 
-  // Apply discount if any (ensure discountPercentage is defined and a number)
-  if (this.discountPercentage && !isNaN(this.discountPercentage)) {
-    this.discount = (this.totalAmount * this.discountPercentage) / 100;
-  } else {
-    this.discount = 0;
-  }
-
+  // Discount is handled elsewhere; ensure finalAmount is accurate
   this.finalAmount = this.totalAmount - this.discount;
 };
-
 
 // Pre-save hook to calculate total amount and assign order number if not provided
 OrderSchema.pre('save', async function (next) {

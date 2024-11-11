@@ -1,4 +1,5 @@
 // routes/couponRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const { body, param, query } = require('express-validator');
@@ -127,6 +128,22 @@ router.delete(
     validateMiddleware
   ],
   couponController.deleteCoupon
+);
+
+// Apply a coupon to an order
+router.post(
+  '/apply',
+  authMiddleware,
+  [
+    body('code')
+      .isString()
+      .withMessage('Coupon code is required'),
+    body('orderTotal')
+      .isFloat({ gt: 0 })
+      .withMessage('Order total must be a positive number'),
+    validateMiddleware
+  ],
+  couponController.applyCoupon
 );
 
 module.exports = router;

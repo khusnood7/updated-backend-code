@@ -7,12 +7,14 @@ const {
   REDIS_HOST,
   REDIS_PORT,
   REDIS_PASSWORD
+  
 } = process.env;
 
 const redisClient = redis.createClient({
   socket: {
     host: REDIS_HOST,
     port: REDIS_PORT,
+    tls: {}, // Add this line to enable TLS if required
   },
   password: REDIS_PASSWORD,
 });

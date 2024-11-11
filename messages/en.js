@@ -12,6 +12,14 @@ const MESSAGES = {
       EMAIL_SEND_FAILURE: 'Email could not be sent.',
       INVALID_TOKEN: 'Invalid or expired token.',
     },
+    ORDER: {
+      CREATE_SUCCESS: 'Order created successfully.',
+      PAYMENT_FAILED: 'Payment processing failed. Please try again.',
+      FETCH_SUCCESS: 'Orders fetched successfully.',
+      ORDER_NOT_FOUND: 'Order not found.',
+      UPDATE_SUCCESS: 'Order status updated successfully.',
+      CANCEL_SUCCESS: 'Order cancelled successfully.',
+    },  
     USER: {
       FETCH_SUCCESS: 'Users fetched successfully.',
       UPDATE_SUCCESS: 'User updated successfully.',

@@ -111,4 +111,22 @@ CartSchema.pre('findOneAndUpdate', async function (next) {
   next();
 });
 
+
+// Pre-findOneAndUpdate middleware to ensure total is recalculated after update
+CartSchema.pre('findOneAndUpdate', async function (next) {
+  const update = this.getUpdate();
+  if (update && update.$set && update.$set.items) {
+    // Calculate total from updated items
+    const updatedItems = update.$set.items;
+    const updatedTotal = updatedItems.reduce((sum, item) => {
+      return sum + item.price * item.quantity;
+    }, 0);
+
+    // Apply updated total to the document
+    this.set({ totalAmount: updatedTotal });
+  }
+  next();
+});
+
+
 module.exports = mongoose.model('Cart', CartSchema);

@@ -1,4 +1,5 @@
 // controllers/couponController.js
+
 const Coupon = require('../models/Coupon');
 const logger = require('../utils/logger');
 const ERROR_CODES = require('../constants/errorCodes');
@@ -144,3 +145,49 @@ exports.deleteCoupon = async (req, res) => {
     res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
+
+// @desc    Apply a coupon to an order
+// @route   POST /api/coupons/apply
+// @access  Private/Customer
+exports.applyCoupon = async (req, res) => {
+  const { code, orderTotal } = req.body;
+
+  // Validate orderTotal
+  if (typeof orderTotal !== 'number' || orderTotal <= 0) {
+    return res.status(422).json({
+      success: false,
+      message: "Order total must be a positive number",
+      validationErrors: [{ field: "orderTotal", message: "Order total must be a positive number" }],
+    });
+  }
+
+  try {
+    const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
+    if (!coupon) {
+      return res.status(404).json({ success: false, message: "Coupon code is invalid or inactive." });
+    }
+
+    // Check if the coupon can be applied
+    const validation = Coupon.canApplyCoupon(coupon);
+    if (!validation.success) {
+      return res.status(400).json({ success: false, message: validation.message });
+    }
+
+    // Calculate discount
+    const result = coupon.applyCoupon(orderTotal);
+    if (!result.success) {
+      return res.status(400).json({ success: false, message: result.message });
+    }
+
+    res.status(200).json({
+      success: true,
+      discount: result.discount,
+      message: "Coupon applied successfully",
+    });
+  } catch (error) {
+    console.error("Apply Coupon Error:", error);
+    res.status(500).json({ success: false, message: "Server error. Please try again later." });
+  }
+};
+
+
