@@ -20,6 +20,12 @@ const MESSAGES = {
       UPDATE_SUCCESS: 'Order status updated successfully.',
       CANCEL_SUCCESS: 'Order cancelled successfully.',
     },  
+    ADDRESS: {
+      CREATE_SUCCESS: "Address created successfully.",
+      FETCH_SUCCESS: "Addresses fetched successfully.",
+      UPDATE_SUCCESS: "Address updated successfully.",
+      NOT_FOUND: "Address not found.",
+    },
     USER: {
       FETCH_SUCCESS: 'Users fetched successfully.',
       UPDATE_SUCCESS: 'User updated successfully.',

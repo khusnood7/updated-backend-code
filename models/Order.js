@@ -2,18 +2,7 @@
 
 const mongoose = require('mongoose');
 const ORDER_STATUS = require('../constants/orderStatus'); // Order status constants
-
-// Address Schema
-const AddressSchema = new mongoose.Schema(
-  {
-    street: { type: String, required: [true, 'Please add a street'], trim: true },
-    city: { type: String, required: [true, 'Please add a city'], trim: true },
-    state: { type: String, required: [true, 'Please add a state'], trim: true },
-    zip: { type: String, required: [true, 'Please add a zip code'], trim: true },
-    country: { type: String, required: [true, 'Please add a country'], trim: true },
-  },
-  { _id: false }
-);
+const AddressSchema = require('./Address'); // Import the AddressSchema
 
 // Order Item Schema
 const OrderItemSchema = new mongoose.Schema(
@@ -78,7 +67,7 @@ const OrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: Object.values(ORDER_STATUS), // Use constants for consistency
+      enum: Object.values(ORDER_STATUS),
       default: ORDER_STATUS.PENDING,
     },
     paymentMethod: {
@@ -129,7 +118,6 @@ OrderSchema.virtual('finalAmount').get(function () {
 // Method to calculate the total amount before saving
 OrderSchema.methods.calculateTotal = function () {
   this.totalAmount = this.items.reduce((acc, item) => {
-    // Ensure item.price is a valid number
     if (item.price == null || isNaN(item.price)) {
       throw new Error('Invalid price in order item');
     }

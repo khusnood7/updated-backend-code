@@ -1,16 +1,16 @@
 // controllers/authController.js
 
 const fs = require("fs");
-const path = require("path"); // Ensure this is present
+const path = require("path");
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const handlebars = require("handlebars"); // Ensure this is present
+const handlebars = require("handlebars");
 const crypto = require("crypto");
 const sendEmail = require("../utils/sendEmail");
 const logger = require("../utils/logger");
 const ERROR_CODES = require("../constants/errorCodes");
-const cloudinary = require("../config/cloudinary"); // Import Cloudinary configuration
+const cloudinary = require("../config/cloudinary");
 
 const { compileTemplate } = require("../services/templateService");
 
@@ -24,6 +24,7 @@ exports.register = async (req, res, next) => {
     // Check if user exists
     let user = await User.findOne({ email });
     if (user) {
+      logger.warn(`Registration attempt with existing email: ${email}`);
       return res
         .status(400)
         .json({ success: false, message: "User already exists" });
@@ -44,7 +45,9 @@ exports.register = async (req, res, next) => {
 
       // Validate the provided admin secret key
       if (!adminSecretKey || adminSecretKey !== adminKeys[role]) {
-        logger.warn(`Invalid or missing admin secret key for role '${role}'`);
+        logger.warn(
+          `Invalid or missing admin secret key for role '${role}' during registration`
+        );
         return res
           .status(403)
           .json({ success: false, message: "Invalid admin secret key" });
@@ -70,7 +73,10 @@ exports.register = async (req, res, next) => {
           const stream = cloudinary.uploader.upload_stream(
             { folder: "user_profiles" },
             (error, result) => {
-              if (error) return reject(error);
+              if (error) {
+                logger.error("Cloudinary Upload Error:", error);
+                return reject(error);
+              }
               resolve(result);
             }
           );
@@ -79,6 +85,9 @@ exports.register = async (req, res, next) => {
 
         // Set profile picture URL
         user.profilePicture = uploadResult.secure_url;
+        logger.info(
+          `Profile picture uploaded for user ${email}: ${uploadResult.secure_url}`
+        );
       } catch (uploadError) {
         logger.error("Profile Picture Upload Error:", uploadError);
         return res.status(500).json({
@@ -89,6 +98,7 @@ exports.register = async (req, res, next) => {
     }
 
     await user.save();
+    logger.info(`New user registered: ${email}`);
 
     // Generate JWT
     const token = jwt.sign(
@@ -102,18 +112,13 @@ exports.register = async (req, res, next) => {
     res.status(201).json({
       success: true,
       token,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        profilePicture: user.profilePicture,
-        isActive: user.isActive,
-      }, // Exclude password
+      data: user, // toJSON method in User model excludes sensitive fields
     });
   } catch (error) {
     logger.error("Register Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -128,6 +133,7 @@ exports.updateProfile = async (req, res, next) => {
     const user = await User.findById(req.user.id);
 
     if (!user) {
+      logger.warn(`Update Profile: User not found with ID ${req.user.id}`);
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
@@ -137,6 +143,7 @@ exports.updateProfile = async (req, res, next) => {
     if (email && email !== user.email) {
       const existingUser = await User.findOne({ email });
       if (existingUser) {
+        logger.warn(`Update Profile: Email already in use - ${email}`);
         return res
           .status(400)
           .json({ success: false, message: "Email already in use" });
@@ -156,7 +163,10 @@ exports.updateProfile = async (req, res, next) => {
           const stream = cloudinary.uploader.upload_stream(
             { folder: "user_profiles" },
             (error, result) => {
-              if (error) return reject(error);
+              if (error) {
+                logger.error("Cloudinary Upload Error:", error);
+                return reject(error);
+              }
               resolve(result);
             }
           );
@@ -165,6 +175,9 @@ exports.updateProfile = async (req, res, next) => {
 
         // Update user's profile picture URL
         user.profilePicture = uploadResult.secure_url;
+        logger.info(
+          `Profile picture updated for user ${user.email}: ${uploadResult.secure_url}`
+        );
       } catch (uploadError) {
         logger.error("Profile Picture Upload Error:", uploadError);
         return res.status(500).json({
@@ -175,21 +188,17 @@ exports.updateProfile = async (req, res, next) => {
     }
 
     await user.save();
+    logger.info(`Profile updated for user ${user.email}`);
 
     res.status(200).json({
       success: true,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        profilePicture: user.profilePicture,
-        isActive: user.isActive,
-      }, // Exclude password
+      data: user,
     });
   } catch (error) {
     logger.error("Update Profile Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -202,22 +211,35 @@ exports.login = async (req, res, next) => {
 
     // Validate email & password
     if (!email || !password) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Please provide email and password" });
+      logger.warn("Login attempt with missing email or password");
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email and password",
+      });
     }
 
     // Check for user
     const user = await User.findOne({ email }).select("+password");
     if (!user) {
+      logger.warn(`Login failed: No user found with email ${email}`);
       return res
         .status(401)
         .json({ success: false, message: ERROR_CODES.AUTHENTICATION_FAILED });
     }
 
+    // Check if user is active
+    if (!user.isActive) {
+      logger.warn(`Login attempt for inactive user ${email}`);
+      return res.status(403).json({
+        success: false,
+        message: "Account is deactivated. Please contact support.",
+      });
+    }
+
     // Check if password matches
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      logger.warn(`Login failed: Incorrect password for email ${email}`);
       return res
         .status(401)
         .json({ success: false, message: ERROR_CODES.AUTHENTICATION_FAILED });
@@ -232,21 +254,18 @@ exports.login = async (req, res, next) => {
       }
     );
 
+    logger.info(`User logged in: ${email}`);
+
     res.status(200).json({
       success: true,
       token,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        profilePicture: user.profilePicture,
-        isActive: user.isActive,
-      }, // Exclude password
+      data: user,
     });
   } catch (error) {
     logger.error("Login Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -256,13 +275,21 @@ exports.login = async (req, res, next) => {
 exports.getMe = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
+    if (!user) {
+      logger.warn(`Get Me: User not found with ID ${req.user.id}`);
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
     res.status(200).json({
       success: true,
       data: user,
     });
   } catch (error) {
     logger.error("Get Me Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -271,14 +298,13 @@ exports.getMe = async (req, res, next) => {
 // @access  Public
 exports.forgotPassword = async (req, res, next) => {
   try {
-    // Logging for debugging
     logger.info("Initiating forgotPassword process");
     logger.info(`Request body: ${JSON.stringify(req.body)}`);
 
     // Find the user by email
     const user = await User.findOne({ email: req.body.email });
     if (!user) {
-      logger.warn(`No user found with email: ${req.body.email}`);
+      logger.warn(`Forgot Password: No user found with email ${req.body.email}`);
       return res
         .status(404)
         .json({ success: false, message: "There is no user with that email" });
@@ -289,20 +315,27 @@ exports.forgotPassword = async (req, res, next) => {
     logger.info(`Generated reset token: ${resetToken}`);
 
     // Hash token and set to resetPasswordToken field
-    user.resetPasswordToken = crypto
+    const hashedResetToken = crypto
       .createHash("sha256")
       .update(resetToken)
       .digest("hex");
-    logger.info(`Hashed reset token: ${user.resetPasswordToken}`);
+    user.resetPasswordToken = hashedResetToken;
+    logger.info(`Hashed reset token: ${hashedResetToken}`);
 
-    // Set token expiration time
+    // Set token expiration time (10 minutes)
     user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+    logger.info(
+      `Reset password token expiration set to: ${new Date(
+        user.resetPasswordExpire
+      ).toISOString()}`
+    );
 
     await user.save({ validateBeforeSave: false });
     logger.info(`Saved reset token and expiration for user: ${user.email}`);
 
     // Create reset URL pointing to the frontend
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+    const frontendURL = process.env.FRONTEND_URL || "http://localhost:5173";
+    const resetUrl = `${frontendURL}/reset-password/${resetToken}`;
     logger.info(`Reset URL: ${resetUrl}`);
 
     // Load and compile the HTML template
@@ -320,7 +353,7 @@ exports.forgotPassword = async (req, res, next) => {
     });
 
     // Define plain text message as a fallback
-    const plainTextMessage = `You are receiving this email because you (or someone else) has requested the reset of a password.\n\nPlease use the following link to reset your password:\n\n${resetUrl}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.`;
+    const plainTextMessage = `You are receiving this email because you (or someone else) have requested the reset of a password.\n\nPlease use the following link to reset your password:\n\n${resetUrl}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.`;
 
     try {
       await sendEmail({
@@ -345,7 +378,9 @@ exports.forgotPassword = async (req, res, next) => {
     }
   } catch (error) {
     logger.error("Forgot Password Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -354,33 +389,55 @@ exports.forgotPassword = async (req, res, next) => {
 // @access  Public
 exports.resetPassword = async (req, res, next) => {
   try {
-    // Get hashed token
-    const resetPasswordToken = crypto
-      .createHash("sha256")
-      .update(req.params.resetToken)
-      .digest("hex");
+    const { resetToken } = req.params;
+    const { password } = req.body;
 
-    // Find user by token and ensure token is not expired
+    logger.info(`Received reset password request with token: ${resetToken}`);
+
+    // Validate input
+    if (!password) {
+      logger.warn("Reset Password: No password provided in request");
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a new password",
+      });
+    }
+
+    // Hash the received reset token
+    const hashedResetToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
+    logger.info(`Hashed received reset token: ${hashedResetToken}`);
+
+    // Find the user by the hashed reset token and ensure token is not expired
     const user = await User.findOne({
-      resetPasswordToken,
+      resetPasswordToken: hashedResetToken,
       resetPasswordExpire: { $gt: Date.now() },
     });
 
     if (!user) {
+      logger.warn(
+        `Reset Password: Invalid or expired token attempted by user with token ${resetToken}`
+      );
       return res
         .status(400)
         .json({ success: false, message: "Invalid or expired token" });
     }
 
+    logger.info(`User found for password reset: ${user.email}`);
+
     // Hash the new password before saving
     const salt = await bcrypt.genSalt(12);
-    user.password = await bcrypt.hash(req.body.password, salt);
+    user.password = await bcrypt.hash(password, salt);
+    logger.info(`Password updated for user: ${user.email}`);
 
     // Clear reset token fields
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
 
     await user.save();
+    logger.info(`Reset token cleared for user: ${user.email}`);
 
     // Generate JWT for the user
     const token = jwt.sign(
@@ -391,21 +448,18 @@ exports.resetPassword = async (req, res, next) => {
       }
     );
 
+    logger.info(`JWT generated for user ${user.email} after password reset`);
+
     res.status(200).json({
       success: true,
       token,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        profilePicture: user.profilePicture,
-        isActive: user.isActive,
-      }, // Exclude password
+      data: user,
     });
   } catch (error) {
     logger.error("Reset Password Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -416,10 +470,13 @@ exports.logout = async (req, res, next) => {
   try {
     // If using token blacklist, add token to blacklist here
     // Example: await blacklistToken(req.token);
+    logger.info(`User logged out: ${req.user.email}`);
 
     res.status(200).json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     logger.error("Logout Error:", error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };

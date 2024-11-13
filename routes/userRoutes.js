@@ -1,5 +1,4 @@
-// routes/userRoutes.js
-
+// Importing the required modules and middlewares
 const express = require('express');
 const router = express.Router();
 const { body, param } = require('express-validator');
@@ -9,6 +8,12 @@ const adminMiddleware = require('../middleware/adminMiddleware');
 const validateMiddleware = require('../middleware/validateMiddleware');
 const USER_ROLES = require('../constants/userRoles');
 const uploadMiddlewares = require('../middleware/uploadMiddleware'); // Import Multer middleware array
+const {
+  getAddresses,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+} = require('../controllers/addressController');
 
 // ============================
 // Validation Rules
@@ -128,5 +133,15 @@ router.post(
   validateMiddleware,
   userController.resetUserPassword
 );
+
+// ============================
+// Address Routes Integration
+// ============================
+
+// Route: /api/users/addresses
+router.route('/addresses').get(authMiddleware, getAddresses).post(authMiddleware, addAddress);
+
+// Route: /api/users/addresses/:id
+router.route('/addresses/:id').put(authMiddleware, updateAddress).delete(authMiddleware, deleteAddress);
 
 module.exports = router;

@@ -1,8 +1,6 @@
 // models/User.js
-
-
 const mongoose = require('mongoose');
-
+const AddressSchema = require('./Address'); // Import the AddressSchema
 
 const UserSchema = new mongoose.Schema(
   {
@@ -52,10 +50,10 @@ const UserSchema = new mongoose.Schema(
     },
     resetPasswordToken: String,
     resetPasswordExpire: Date,
+    addresses: [AddressSchema], // Embedding the AddressSchema as subdocuments
   },
   { timestamps: true }
 );
-
 
 // Exclude password and other sensitive fields from JSON responses
 UserSchema.methods.toJSON = function () {
@@ -66,8 +64,4 @@ UserSchema.methods.toJSON = function () {
   return obj;
 };
 
-
 module.exports = mongoose.model('User', UserSchema);
-
-
-
