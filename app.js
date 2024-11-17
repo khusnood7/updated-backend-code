@@ -31,6 +31,10 @@ const contactRoutes = require('./routes/contactRoutes');
 const cartRoutes = require('./routes/cartRoutes'); 
 const validateConfig = require('./utils/validateConfig');
 const setupGoogleStrategy = require('./services/googleOAuthService');
+const emailListRoutes = require('./routes/emailListRoutes');
+const chatbotRoutes = require('./routes/chatbotRoutes');
+
+
 
 // Body parser setup
 const { json, urlencoded } = express;
@@ -131,6 +135,10 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/cart', cartRoutes);
+app.use('/api/review', reviewRoutes);
+app.use('/api/email-list', emailListRoutes);
+app.use('/api/chatbot', chatbotRoutes);
+
 
 // Serve an HTML file on the root route to indicate the server is running
 app.get('/', (req, res) => {

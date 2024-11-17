@@ -58,6 +58,11 @@ const updateProfileValidation = [
     .withMessage('Please provide a valid email'),
 ];
 
+// Validation rules for account deletion
+const requestDeleteAccountValidation = [
+  // No body parameters needed; user is authenticated
+];
+
 // Routes
 router.post(
   '/register',
@@ -94,6 +99,20 @@ router.post(
   authController.resetPassword
 );
 
+// Account Deletion Routes
+router.post(
+  '/request-delete-account',
+  authMiddleware,
+  requestDeleteAccountValidation,
+  validateMiddleware,
+  authController.requestAccountDeletion
+);
+
+router.get(
+  '/confirm-delete/:token',
+  authController.confirmAccountDeletion
+);
+
 // Google OAuth login route
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
@@ -114,7 +133,6 @@ router.get(
     }
   }
 );
-
 
 // Update profile with image upload
 router.put(

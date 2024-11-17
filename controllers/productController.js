@@ -116,7 +116,7 @@ exports.searchProducts = async (req, res) => {
 // @access  Public/Admin
 exports.getAllProducts = async (req, res) => {
   try {
-    const { category, tags, priceMin, priceMax, inStock, variants, packaging, page = 1, limit = 6 } = req.query; // Set default limit to 6
+    const { category, tags, priceMin, priceMax, inStock, variants, packaging, page = 1, limit = 100 } = req.query; // Set default limit to 6
 
     let query = {};
 

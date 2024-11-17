@@ -20,6 +20,12 @@ const createOrderValidation = [
   body('items.*.quantity')
     .isInt({ min: 1 })
     .withMessage('Quantity must be at least 1'),
+  body('items.*.variant')
+    .isString()
+    .withMessage('Variant must be a string'),
+  body('items.*.packaging')
+    .isString()
+    .withMessage('Packaging must be a string'),
   body('shippingAddress.street')
     .notEmpty()
     .withMessage('Street address is required'),
@@ -60,6 +66,93 @@ const createOrderValidation = [
   // Optional: Add couponCode validations if needed
 ];
 
+// Validation rules for updating order status
+const updateOrderStatusValidation = [
+  param('id')
+    .isMongoId()
+    .withMessage('Invalid order ID'),
+  body('status')
+    .isIn([
+      'pending',
+      'processing',
+      'shipped',
+      'delivered',
+      'cancelled',
+      'refunded',
+    ])
+    .withMessage('Invalid order status'),
+];
+
+// Validation rules for cancelling an order
+const cancelOrderValidation = [
+  param('id')
+    .isMongoId()
+    .withMessage('Invalid order ID'),
+  body('reason')
+    .optional()
+    .isString()
+    .withMessage('Reason must be a string'),
+];
+
+// Validation rules for getting all orders (Admin)
+const getAllOrdersValidation = [
+  query('status')
+    .optional()
+    .isIn([
+      'pending',
+      'processing',
+      'shipped',
+      'delivered',
+      'cancelled',
+      'refunded',
+    ])
+    .withMessage('Invalid status'),
+  query('dateFrom')
+    .optional()
+    .isISO8601()
+    .toDate()
+    .withMessage('Invalid dateFrom'),
+  query('dateTo')
+    .optional()
+    .isISO8601()
+    .toDate()
+    .withMessage('Invalid dateTo'),
+  query('page')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('page must be at least 1'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('limit must be at least 1'),
+];
+
+// Validation rules for getting authenticated user's orders
+const getMyOrdersValidation = [
+  query('status')
+    .optional()
+    .isIn(['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'])
+    .withMessage('Invalid status'),
+  query('dateFrom')
+    .optional()
+    .isISO8601()
+    .toDate()
+    .withMessage('Invalid dateFrom'),
+  query('dateTo')
+    .optional()
+    .isISO8601()
+    .toDate()
+    .withMessage('Invalid dateTo'),
+  query('page')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Page must be at least 1'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Limit must be at least 1'),
+];
+
 // Routes
 
 // Create a new order
@@ -80,74 +173,19 @@ router.get(
     USER_ROLES.ORDER_MANAGER,
     USER_ROLES.ANALYTICS_VIEWER,
   ]),
-  [
-    query('status')
-      .optional()
-      .isIn([
-        'pending',
-        'processing',
-        'shipped',
-        'delivered',
-        'cancelled',
-        'refunded',
-      ])
-      .withMessage('Invalid status'),
-    query('dateFrom')
-      .optional()
-      .isISO8601()
-      .toDate()
-      .withMessage('Invalid dateFrom'),
-    query('dateTo')
-      .optional()
-      .isISO8601()
-      .toDate()
-      .withMessage('Invalid dateTo'),
-    query('page')
-      .optional()
-      .isInt({ min: 1 })
-      .withMessage('page must be at least 1'),
-    query('limit')
-      .optional()
-      .isInt({ min: 1 })
-      .withMessage('limit must be at least 1'),
-    validateMiddleware,
-  ],
+  getAllOrdersValidation,
+  validateMiddleware,
   orderController.getAllOrders
 );
-
 
 // Get authenticated user's orders
 router.get(
   '/my-orders',
   authMiddleware,
-  [
-    query('status')
-      .optional()
-      .isIn(['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'])
-      .withMessage('Invalid status'),
-    query('dateFrom')
-      .optional()
-      .isISO8601()
-      .toDate()
-      .withMessage('Invalid dateFrom'),
-    query('dateTo')
-      .optional()
-      .isISO8601()
-      .toDate()
-      .withMessage('Invalid dateTo'),
-    query('page')
-      .optional()
-      .isInt({ min: 1 })
-      .withMessage('Page must be at least 1'),
-    query('limit')
-      .optional()
-      .isInt({ min: 1 })
-      .withMessage('Limit must be at least 1'),
-    validateMiddleware,
-  ],
+  getMyOrdersValidation,
+  validateMiddleware,
   orderController.getMyOrders
 );
-
 
 // Get order by ID
 router.get(
@@ -157,8 +195,8 @@ router.get(
     param('id')
       .isMongoId()
       .withMessage('Invalid order ID'),
-    validateMiddleware,
   ],
+  validateMiddleware,
   orderController.getOrderById
 );
 
@@ -170,27 +208,10 @@ router.put(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.ORDER_MANAGER,
   ]),
-  [
-    param('id')
-      .isMongoId()
-      .withMessage('Invalid order ID'),
-    body('status')
-      .isIn([
-        'pending',
-        'processing',
-        'shipped',
-        'delivered',
-        'cancelled',
-        'refunded',
-      ])
-      .withMessage('Invalid order status'),
-    validateMiddleware,
-  ],
+  updateOrderStatusValidation,
+  validateMiddleware,
   orderController.updateOrderStatus
 );
-
-
-
 
 // Cancel an order (Admin)
 router.post(
@@ -200,16 +221,8 @@ router.post(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.ORDER_MANAGER,
   ]),
-  [
-    param('id')
-      .isMongoId()
-      .withMessage('Invalid order ID'),
-    body('reason')
-      .optional()
-      .isString()
-      .withMessage('Reason must be a string'),
-    validateMiddleware,
-  ],
+  cancelOrderValidation,
+  validateMiddleware,
   orderController.cancelOrder
 );
 

@@ -1,4 +1,5 @@
 // routes/reviewRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const { body, param } = require('express-validator');
@@ -7,6 +8,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 const adminMiddleware = require('../middleware/adminMiddleware');
 const validateMiddleware = require('../middleware/validateMiddleware');
 const USER_ROLES = require('../constants/userRoles');
+const uploadMiddlewares = require('../middleware/uploadMiddleware'); // Import Multer middleware array
 
 // Validation rules
 const createReviewValidation = [
@@ -15,22 +17,17 @@ const createReviewValidation = [
   body('comment').optional().isString().isLength({ max: 1000 }).withMessage('Comment too long'),
 ];
 
-const approveReviewValidation = [
-  body('isApproved').isBoolean().withMessage('isApproved must be a boolean'),
-];
-
 // Routes
 
-// Create a new review
 router.post(
   '/',
   authMiddleware,
+  ...uploadMiddlewares, // Apply upload and error handling middleware
   createReviewValidation,
   validateMiddleware,
   reviewController.createReview
 );
-
-// Get all reviews (Admin)
+// Get all reviews (Admin/Product Manager)
 router.get(
   '/',
   authMiddleware,
@@ -41,7 +38,12 @@ router.get(
 // Get review by ID
 router.get(
   '/:id',
-  [param('id').isMongoId().withMessage('Invalid review ID'), validateMiddleware],
+  [
+    authMiddleware,
+    adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.PRODUCT_MANAGER]),
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    validateMiddleware,
+  ],
   reviewController.getReviewById
 );
 
@@ -50,7 +52,12 @@ router.put(
   '/:id',
   authMiddleware,
   adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.PRODUCT_MANAGER]),
-  [param('id').isMongoId().withMessage('Invalid review ID'), approveReviewValidation, validateMiddleware],
+  [
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    body('isApproved').optional().isBoolean().withMessage('isApproved must be a boolean'),
+    body('comment').optional().isString().withMessage('Comment must be a string'),
+    validateMiddleware,
+  ],
   reviewController.updateReview
 );
 
@@ -59,7 +66,10 @@ router.delete(
   '/:id',
   authMiddleware,
   adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.PRODUCT_MANAGER]),
-  [param('id').isMongoId().withMessage('Invalid review ID'), validateMiddleware],
+  [
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    validateMiddleware,
+  ],
   reviewController.deleteReview
 );
 

@@ -1,3 +1,5 @@
+// models/Review.js
+
 const mongoose = require('mongoose');
 
 const ReviewSchema = new mongoose.Schema(
@@ -23,6 +25,18 @@ const ReviewSchema = new mongoose.Schema(
       trim: true,
       maxlength: [1000, 'Comment cannot exceed 1000 characters'],
     },
+    photos: [
+      {
+        url: {
+          type: String,
+          required: true,
+        },
+        public_id: {
+          type: String,
+          required: true,
+        },
+      },
+    ],
     isApproved: {
       type: Boolean,
       default: false,

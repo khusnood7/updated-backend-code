@@ -12,11 +12,16 @@ const logger = require("../utils/logger");
 const ERROR_CODES = require("../constants/errorCodes");
 const cloudinary = require("../config/cloudinary");
 
-const { compileTemplate } = require("../services/templateService");
+// Import related models for cascading deletes
+const Order = require("../models/Order");
+// Removed Post import as it's not required
+// const Post = require("../models/Post"); // Removed
 
-// @desc    Register a new user
-// @route   POST /api/auth/register
-// @access  Public
+/**
+ * @desc    Register a new user
+ * @route   POST /api/auth/register
+ * @access  Public
+ */
 exports.register = async (req, res, next) => {
   try {
     const { name, email, password, role, adminSecretKey } = req.body;
@@ -122,9 +127,11 @@ exports.register = async (req, res, next) => {
   }
 };
 
-// @desc    Update user profile
-// @route   PUT /api/auth/update-profile
-// @access  Private
+/**
+ * @desc    Update user profile
+ * @route   PUT /api/auth/update-profile
+ * @access  Private
+ */
 exports.updateProfile = async (req, res, next) => {
   try {
     const { name, email } = req.body;
@@ -202,9 +209,11 @@ exports.updateProfile = async (req, res, next) => {
   }
 };
 
-// @desc    Login user/admin
-// @route   POST /api/auth/login
-// @access  Public
+/**
+ * @desc    Login user/admin
+ * @route   POST /api/auth/login
+ * @access  Public
+ */
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -269,9 +278,11 @@ exports.login = async (req, res, next) => {
   }
 };
 
-// @desc    Get current logged-in user
-// @route   GET /api/auth/me
-// @access  Private
+/**
+ * @desc    Get current logged-in user
+ * @route   GET /api/auth/me
+ * @access  Private
+ */
 exports.getMe = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -293,9 +304,11 @@ exports.getMe = async (req, res, next) => {
   }
 };
 
-// @desc    Forgot Password
-// @route   POST /api/auth/forgot-password
-// @access  Public
+/**
+ * @desc    Forgot Password
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
 exports.forgotPassword = async (req, res, next) => {
   try {
     logger.info("Initiating forgotPassword process");
@@ -384,9 +397,11 @@ exports.forgotPassword = async (req, res, next) => {
   }
 };
 
-// @desc    Reset Password
-// @route   POST /api/auth/reset-password/:resetToken
-// @access  Public
+/**
+ * @desc    Reset Password
+ * @route   POST /api/auth/reset-password/:resetToken
+ * @access  Public
+ */
 exports.resetPassword = async (req, res, next) => {
   try {
     const { resetToken } = req.params;
@@ -463,9 +478,11 @@ exports.resetPassword = async (req, res, next) => {
   }
 };
 
-// @desc    Logout User
-// @route   POST /api/auth/logout
-// @access  Private
+/**
+ * @desc    Logout User
+ * @route   POST /api/auth/logout
+ * @access  Private
+ */
 exports.logout = async (req, res, next) => {
   try {
     // If using token blacklist, add token to blacklist here
@@ -478,5 +495,128 @@ exports.logout = async (req, res, next) => {
     res
       .status(500)
       .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+  }
+};
+
+/**
+ * @desc    Initiates the account deletion process by sending a confirmation email.
+ * @route   POST /api/auth/request-delete-account
+ * @access  Private
+ */
+exports.requestAccountDeletion = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      logger.warn(`Request Account Deletion: User not found with ID ${req.user.id}`);
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Generate a unique deletion token
+    const deletionToken = crypto.randomBytes(20).toString("hex");
+
+    // Hash the token and set it to the user
+    const hashedDeletionToken = crypto
+      .createHash("sha256")
+      .update(deletionToken)
+      .digest("hex");
+    user.deletionToken = hashedDeletionToken;
+    user.deletionTokenExpire = Date.now() + 24 * 60 * 60 * 1000; // Token valid for 24 hours
+
+    await user.save({ validateBeforeSave: false });
+    logger.info(`Deletion token generated for user: ${user.email}`);
+
+    // Create deletion URL pointing to the frontend
+    const frontendURL = process.env.FRONTEND_URL || "http://localhost:5173";
+    const deleteUrl = `${frontendURL}/confirm-delete/${deletionToken}`;
+
+    // Load and compile the HTML template
+    const templatePath = path.join(__dirname, "../templates/accountDeletion.html");
+    const templateSource = fs.readFileSync(templatePath, "utf8");
+    const template = handlebars.compile(templateSource);
+
+    const htmlContent = template({
+      name: user.name,
+      deleteUrl,
+      supportUrl: `${frontendURL}/contact`, // Ensure this matches your actual support/contact page
+    });
+
+    // Define plain text message as a fallback
+    const plainTextMessage = `Hello ${user.name},
+
+You have requested to delete your account. Please confirm this action by visiting the following link:
+
+${deleteUrl}
+
+If you did not request this, please ignore this email or contact support immediately.
+
+Thank you,
+Your Company Team`;
+
+    // Send the confirmation email
+    await sendEmail({
+      email: user.email,
+      subject: "Confirm Account Deletion",
+      message: plainTextMessage,
+      html: htmlContent,
+    });
+
+    logger.info(`Account deletion confirmation email sent to: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: "Account deletion confirmation email sent. Please check your inbox.",
+    });
+  } catch (error) {
+    logger.error("Request Account Deletion Error:", error);
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+  }
+};
+
+/**
+ * @desc    Confirms the account deletion when the user clicks the link in the email.
+ * @route   GET /api/auth/confirm-delete/:token
+ * @access  Public
+ */
+exports.confirmAccountDeletion = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      logger.warn("Confirm Account Deletion: No token provided");
+      return res.status(400).json({ success: false, message: "Invalid or missing token" });
+    }
+
+    // Hash the received token
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    // Find the user with the matching deletion token and ensure it's not expired
+    const user = await User.findOne({
+      deletionToken: hashedToken,
+      deletionTokenExpire: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      logger.warn(`Confirm Account Deletion: Invalid or expired token`);
+      return res.status(400).json({ success: false, message: "Invalid or expired token" });
+    }
+
+    // Delete related data
+    await Order.deleteMany({ user: user._id });
+    // Removed Post.deleteMany as Post model is not required
+    // await Post.deleteMany({ user: user._id }); // Removed
+
+    // Perform a hard delete: permanently remove the user from the database
+    await User.findByIdAndDelete(user._id);
+
+    logger.info(`User account permanently deleted: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: "Your account has been successfully deleted.",
+    });
+  } catch (error) {
+    logger.error("Confirm Account Deletion Error:", error);
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
