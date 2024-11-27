@@ -6,7 +6,7 @@ const AuditLogSchema = new mongoose.Schema(
   {
     entity: {
       type: String,
-      required: true,
+      required: false, // Changed from true to false
       enum: [
         'Settings',
         'NotificationTemplate',
@@ -16,16 +16,17 @@ const AuditLogSchema = new mongoose.Schema(
         'Coupon',
         'Review',
         'BlogPost',
+        'BulkOperation', // Optionally add 'BulkOperation' if desired
       ], // Add other entities as needed
     },
     action: {
       type: String,
       required: true,
-      enum: ['CREATE', 'UPDATE', 'DELETE', 'RESTORE'],
+      enum: ['CREATE', 'UPDATE', 'DELETE', 'RESTORE', 'BULK_UPDATE'],
     },
     entityId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+      required: false, // Changed from true to false
     },
     changes: {
       type: Map,
@@ -44,6 +45,9 @@ const AuditLogSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    details: {
+      type: String,
+    },
   },
   {
     timestamps: true, // Automatically includes createdAt and updatedAt fields
@@ -54,9 +58,10 @@ const AuditLogSchema = new mongoose.Schema(
 AuditLogSchema.statics.logAction = async function (
   entity,
   action,
-  entityId,
+  entityId = null,
   changes = {},
-  performedBy
+  performedBy,
+  details = ''
 ) {
   try {
     return await this.create({
@@ -65,6 +70,7 @@ AuditLogSchema.statics.logAction = async function (
       entityId,
       changes,
       performedBy,
+      details,
     });
   } catch (error) {
     console.error('Error logging audit action:', error);

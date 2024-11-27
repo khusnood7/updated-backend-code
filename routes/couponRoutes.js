@@ -56,6 +56,25 @@ const updateCouponValidation = [
     .withMessage('isActive must be a boolean'),
 ];
 
+// Validation rules for deactivating or activating a coupon
+const toggleCouponValidation = [
+  param('id')
+    .isMongoId()
+    .withMessage('Invalid coupon ID'),
+  validateMiddleware,
+];
+
+// Validation rules for applying a coupon
+const applyCouponValidation = [
+  body('code')
+    .isString()
+    .withMessage('Coupon code is required'),
+  body('orderTotal')
+    .isFloat({ gt: 0 })
+    .withMessage('Order total must be a positive number'),
+  validateMiddleware,
+];
+
 // Routes
 
 // Create a new coupon
@@ -96,7 +115,7 @@ router.get(
     param('id')
       .isMongoId()
       .withMessage('Invalid coupon ID'),
-    validateMiddleware
+    validateMiddleware,
   ],
   couponController.getCouponById
 );
@@ -111,12 +130,12 @@ router.put(
       .isMongoId()
       .withMessage('Invalid coupon ID'),
     updateCouponValidation,
-    validateMiddleware
+    validateMiddleware,
   ],
   couponController.updateCoupon
 );
 
-// Delete or deactivate a coupon by ID
+// Delete (permanently remove) a coupon by ID
 router.delete(
   '/:id',
   authMiddleware,
@@ -125,24 +144,34 @@ router.delete(
     param('id')
       .isMongoId()
       .withMessage('Invalid coupon ID'),
-    validateMiddleware
+    validateMiddleware,
   ],
   couponController.deleteCoupon
+);
+
+// Deactivate a coupon by ID
+router.post(
+  '/:id/deactivate',
+  authMiddleware,
+  adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.MARKETING_MANAGER]),
+  toggleCouponValidation,
+  couponController.deactivateCoupon
+);
+
+// Activate a coupon by ID
+router.post(
+  '/:id/activate',
+  authMiddleware,
+  adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.MARKETING_MANAGER]),
+  toggleCouponValidation,
+  couponController.activateCoupon
 );
 
 // Apply a coupon to an order
 router.post(
   '/apply',
   authMiddleware,
-  [
-    body('code')
-      .isString()
-      .withMessage('Coupon code is required'),
-    body('orderTotal')
-      .isFloat({ gt: 0 })
-      .withMessage('Order total must be a positive number'),
-    validateMiddleware
-  ],
+  applyCouponValidation,
   couponController.applyCoupon
 );
 

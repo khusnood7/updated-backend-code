@@ -37,6 +37,35 @@ const ContactMessageSchema = new mongoose.Schema(
       enum: ['new', 'in-progress', 'resolved'],
       default: 'new',
     },
+    assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    deleted: {
+      type: Boolean,
+      default: false,
+    },
+    responses: [
+      {
+        responder: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        message: {
+          type: String,
+          required: true,
+          trim: true,
+          minlength: [10, 'Response must be at least 10 characters long'],
+          maxlength: [1000, 'Response cannot exceed 1000 characters'],
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true, // Automatically adds createdAt and updatedAt fields
@@ -50,8 +79,9 @@ const ContactMessageSchema = new mongoose.Schema(
   }
 );
 
-// Indexes for efficient retrieval by status and creation date
+// Indexes for efficient retrieval by status, creation date, and deletion status
 ContactMessageSchema.index({ status: 1 });
 ContactMessageSchema.index({ createdAt: -1 });
+ContactMessageSchema.index({ deleted: 1 });
 
 module.exports = mongoose.model('ContactMessage', ContactMessageSchema);

@@ -53,6 +53,12 @@ const UserSchema = new mongoose.Schema(
     resetPasswordExpire: Date,
     deletionToken: String, // Field for deletion token
     deletionTokenExpire: Date, // Field for token expiration
+    otp: {
+      type: String,
+    },
+    otpExpire: {
+      type: Date,
+    },
     addresses: [AddressSchema], // Embedding the AddressSchema as subdocuments
   },
   { timestamps: true }
@@ -66,6 +72,8 @@ UserSchema.methods.toJSON = function () {
   delete obj.resetPasswordExpire;
   delete obj.deletionToken;
   delete obj.deletionTokenExpire;
+  delete obj.otp;
+  delete obj.otpExpire;
   return obj;
 };
 

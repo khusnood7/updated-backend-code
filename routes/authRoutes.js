@@ -31,6 +31,14 @@ const loginValidation = [
   body('password').exists().withMessage('Password is required'),
 ];
 
+// Validation rules for verify OTP
+const verifyOTPValidation = [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('OTP must be 6 digits'),
+];
+
 // Validation rules for forgot password
 const forgotPasswordValidation = [
   body('email').isEmail().withMessage('Please provide a valid email'),
@@ -63,6 +71,11 @@ const requestDeleteAccountValidation = [
   // No body parameters needed; user is authenticated
 ];
 
+// Validation rules for resend OTP
+const resendOTPValidation = [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+];
+
 // Routes
 router.post(
   '/register',
@@ -70,28 +83,47 @@ router.post(
   validateMiddleware,
   authController.register
 );
+
 router.post(
   '/login',
   loginValidation,
   validateMiddleware,
   authController.login
 );
+
+router.post(
+  '/verify-otp',
+  verifyOTPValidation,
+  validateMiddleware,
+  authController.verifyOTP
+);
+
+router.post(
+  '/resend-otp',
+  resendOTPValidation,
+  validateMiddleware,
+  authController.resendOTP
+);
+
 router.post(
   '/logout',
   authMiddleware,
   authController.logout
 );
+
 router.get(
   '/me',
   authMiddleware,
   authController.getMe
 );
+
 router.post(
   '/forgot-password',
   forgotPasswordValidation,
   validateMiddleware,
   authController.forgotPassword
 );
+
 router.post(
   '/reset-password/:resetToken',
   resetPasswordValidation,

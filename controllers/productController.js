@@ -1,6 +1,6 @@
-// controllers/productController.js
-
+const mongoose = require('mongoose');
 const Product = require('../models/Product');
+const Tag = require('../models/Tag'); // Assuming you have a Tag model
 const cloudinary = require('../config/cloudinary');
 const logger = require('../utils/logger');
 const ERROR_CODES = require('../constants/errorCodes');
@@ -10,22 +10,86 @@ const ERROR_CODES = require('../constants/errorCodes');
 // @access  Private/Admin/Product Manager
 exports.createProduct = async (req, res) => {
   try {
-    const { title, price, stock, description, category, tags, discountPercentage, brand, accordion } = req.body;
+    // Destructure fields from the request body
+    const {
+      title,
+      price,
+      stock,
+      description,
+      category,
+      tags, // Expected to be an array of tag names or IDs
+      discountPercentage,
+      brand,
+      accordion,
+      productBG, // URL to the product background image
+      thumbnail, // URL to the thumbnail image
+      variants, // Array of variant objects
+    } = req.body;
 
+    // Validate required fields
+    if (!productBG) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product background image (productBG) is required.',
+      });
+    }
+
+    if (!thumbnail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thumbnail image URL is required.',
+      });
+    }
+
+    if (!Array.isArray(variants) || variants.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one variant is required.',
+      });
+    }
+
+    // Validate and convert tags to ObjectIds
+    let tagIds = [];
+    if (tags && Array.isArray(tags)) {
+      // Assuming tags are sent as names. If they're sent as IDs, adjust accordingly.
+      const foundTags = await Tag.find({ name: { $in: tags } });
+      if (foundTags.length !== tags.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more tags are invalid.',
+        });
+      }
+      tagIds = foundTags.map(tag => tag._id);
+    }
+
+    // Create a new product instance with validated and formatted data
     const product = new Product({
       title,
       price,
       stock,
       description,
       category,
-      tags,
+      tags: tagIds, // Use the array of ObjectIds
       discountPercentage,
       brand,
       accordion,
-      images: [],
+      productBG,
+      thumbnail,
+      images: [], // Initialize as empty; can be updated later
+      variants, // Ensure variants array has at least one variant
     });
 
+    // Save the product to the database
     await product.save();
+
+    // Log the creation in AuditLog if applicable
+    // await AuditLog.create({
+    //   performedBy: req.user._id, // Assuming you have user info in req.user
+    //   entityId: product._id,
+    //   entity: 'Product',
+    //   action: 'CREATE',
+    //   details: `Created product with title: ${product.title}`,
+    // });
 
     res.status(201).json({
       success: true,
@@ -33,6 +97,75 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     logger.error('Create Product Error:', error);
+
+    // Handle specific Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => ({
+        field: err.path,
+        message: err.message,
+      }));
+      return res.status(400).json({
+        success: false,
+        message: 'Validation Error',
+        errors,
+      });
+    }
+
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+  }
+};
+
+// @desc    Upload product image
+// @route   POST /api/products/upload-image
+// @access  Private/Admin/Product Manager
+exports.uploadProductImage = async (req, res) => {
+  try {
+    // Ensure that the file was uploaded
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded. Please upload an image with the field name "image".',
+      });
+    }
+
+    const file = req.file;
+
+    // Optional: Additional file validation can be done here
+
+    // Upload the image buffer to Cloudinary
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'products',
+          width: 800,
+          height: 800,
+          crop: 'fill',
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+      stream.end(file.buffer);
+    });
+
+    logger.info('Image uploaded to Cloudinary:', result.secure_url);
+
+    res.status(200).json({
+      success: true,
+      data: result.secure_url,
+    });
+  } catch (error) {
+    logger.error('Upload Product Image Error:', error);
+
+    // Handle Cloudinary errors specifically
+    if (error.name === 'Error' && error.http_code) {
+      return res.status(error.http_code).json({
+        success: false,
+        message: error.message || ERROR_CODES.SERVER_ERROR,
+      });
+    }
+
     res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
@@ -42,8 +175,7 @@ exports.createProduct = async (req, res) => {
 // @access  Public/Admin
 exports.getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate('tags'); // Populating 'tags' as it's now defined in the schema
+    const product = await Product.findById(req.params.id).populate('tags'); // Populating 'tags' as it's defined in the schema
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -64,8 +196,7 @@ exports.getProductById = async (req, res) => {
 // @access  Public
 exports.getProductBySlug = async (req, res) => {
   try {
-    const product = await Product.findOne({ slug: req.params.slug })
-      .populate('tags'); // Populating 'tags'
+    const product = await Product.findOne({ slug: req.params.slug }).populate('tags'); // Populating 'tags'
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -80,7 +211,6 @@ exports.getProductBySlug = async (req, res) => {
     res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
-
 
 // @desc    Search products by query
 // @route   GET /api/products/search
@@ -108,15 +238,22 @@ exports.searchProducts = async (req, res) => {
   }
 };
 
-
-
-
 // @desc    Get all products with filters and pagination
 // @route   GET /api/products
 // @access  Public/Admin
 exports.getAllProducts = async (req, res) => {
   try {
-    const { category, tags, priceMin, priceMax, inStock, variants, packaging, page = 1, limit = 100 } = req.query; // Set default limit to 6
+    const {
+      category,
+      tags,
+      priceMin,
+      priceMax,
+      inStock,
+      variants,
+      packaging,
+      page = 1,
+      limit = 100,
+    } = req.query; // Set default limit to 100
 
     let query = {};
 
@@ -158,6 +295,7 @@ exports.getAllProducts = async (req, res) => {
     const total = await Product.countDocuments(query);
     const totalPages = Math.ceil(total / limit);
     const products = await Product.find(query)
+      .populate('tags')
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
@@ -175,39 +313,40 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-
-// @desc    Get a single product by ID
-// @route   GET /api/products/:id
-// @access  Public/Admin
-exports.getProductById = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id).populate('category').populate('tags');
-
-    if (!product) {
-      return res.status(404).json({ success: false, message: 'Product not found' });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: product,
-    });
-  } catch (error) {
-    logger.error('Get Product By ID Error:', error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
-  }
-};
-
 // @desc    Update a product by ID
 // @route   PUT /api/products/:id
 // @access  Private/Admin/Product Manager
 exports.updateProduct = async (req, res) => {
   try {
     const updates = req.body;
+    const productId = req.params.id;
 
-    let product = await Product.findById(req.params.id);
+    let product = await Product.findById(productId);
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    // If tags are being updated, convert them to ObjectIds
+    if (updates.tags && Array.isArray(updates.tags)) {
+      const foundTags = await Tag.find({ name: { $in: updates.tags } });
+      if (foundTags.length !== updates.tags.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more tags are invalid.',
+        });
+      }
+      updates.tags = foundTags.map(tag => tag._id);
+    }
+
+    // If variants are being updated, ensure there's at least one variant
+    if (updates.variants) {
+      if (!Array.isArray(updates.variants) || updates.variants.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one variant is required.',
+        });
+      }
     }
 
     // Update each field if provided
@@ -221,12 +360,35 @@ exports.updateProduct = async (req, res) => {
 
     await product.save();
 
+    // Log the update in AuditLog if applicable
+    // await AuditLog.create({
+    //   performedBy: req.user._id,
+    //   entityId: product._id,
+    //   entity: 'Product',
+    //   action: 'UPDATE',
+    //   details: `Updated product with title: ${product.title}`,
+    // });
+
     res.status(200).json({
       success: true,
       data: product,
     });
   } catch (error) {
     logger.error('Update Product Error:', error);
+
+    // Handle specific Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => ({
+        field: err.path,
+        message: err.message,
+      }));
+      return res.status(400).json({
+        success: false,
+        message: 'Validation Error',
+        errors,
+      });
+    }
+
     res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
@@ -236,7 +398,9 @@ exports.updateProduct = async (req, res) => {
 // @access  Private/Admin/Product Manager
 exports.deleteProduct = async (req, res) => {
   try {
-    let product = await Product.findById(req.params.id);
+    const productId = req.params.id;
+
+    let product = await Product.findById(productId);
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -244,6 +408,15 @@ exports.deleteProduct = async (req, res) => {
 
     product.isActive = false; // Soft delete
     await product.save();
+
+    // Log the deletion in AuditLog if applicable
+    // await AuditLog.create({
+    //   performedBy: req.user._id,
+    //   entityId: product._id,
+    //   entity: 'Product',
+    //   action: 'DELETE',
+    //   details: `Deactivated product with title: ${product.title}`,
+    // });
 
     res.status(200).json({
       success: true,
@@ -261,8 +434,9 @@ exports.deleteProduct = async (req, res) => {
 exports.updateProductStock = async (req, res) => {
   try {
     const { stock } = req.body;
+    const productId = req.params.id;
 
-    let product = await Product.findById(req.params.id);
+    let product = await Product.findById(productId);
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -270,6 +444,15 @@ exports.updateProductStock = async (req, res) => {
 
     product.stock = stock;
     await product.save();
+
+    // Log the stock update in AuditLog if applicable
+    // await AuditLog.create({
+    //   performedBy: req.user._id,
+    //   entityId: product._id,
+    //   entity: 'Product',
+    //   action: 'UPDATE',
+    //   details: `Updated stock for product with title: ${product.title} to ${stock}`,
+    // });
 
     res.status(200).json({
       success: true,
@@ -288,25 +471,72 @@ exports.bulkUpdateProducts = async (req, res) => {
   try {
     const { updates } = req.body; // Array of { id, fields to update }
 
-    const bulkOps = updates.map((update) => {
-      const updateFields = { ...update.fields };
-      if (updateFields.accordion && typeof updateFields.accordion === 'object') {
-        // Merge existing accordion data with new data
-        updateFields.accordion = { ...updateFields.accordion };
-      }
-      return {
-        updateOne: {
-          filter: { _id: update.id },
-          update: { $set: updateFields },
-        },
-      };
-    });
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Updates must be a non-empty array.',
+      });
+    }
 
-    await Product.bulkWrite(bulkOps);
+    // Prepare bulk operations
+    const bulkOps = [];
+
+    for (const update of updates) {
+      const { id, fields } = update;
+
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid product ID: ${id}`,
+        });
+      }
+
+      // If tags are being updated, convert them to ObjectIds
+      if (fields.tags && Array.isArray(fields.tags)) {
+        const foundTags = await Tag.find({ name: { $in: fields.tags } });
+        if (foundTags.length !== fields.tags.length) {
+          return res.status(400).json({
+            success: false,
+            message: `One or more tags are invalid for product ID: ${id}`,
+          });
+        }
+        fields.tags = foundTags.map(tag => tag._id);
+      }
+
+      // If variants are being updated, ensure there's at least one variant
+      if (fields.variants) {
+        if (!Array.isArray(fields.variants) || fields.variants.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: `At least one variant is required for product ID: ${id}`,
+          });
+        }
+      }
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: id },
+          update: { $set: fields },
+        },
+      });
+    }
+
+    // Execute bulk operations
+    const result = await Product.bulkWrite(bulkOps);
+
+    // Log the bulk update in AuditLog if applicable
+    // await AuditLog.create({
+    //   performedBy: req.user._id,
+    //   entityId: null, // Since multiple products are updated
+    //   entity: 'Product',
+    //   action: 'UPDATE',
+    //   details: `Bulk updated ${result.modifiedCount} products.`,
+    // });
 
     res.status(200).json({
       success: true,
-      message: 'Products updated successfully',
+      message: `${result.modifiedCount} products updated successfully.`,
+      result,
     });
   } catch (error) {
     logger.error('Bulk Update Products Error:', error);
@@ -319,19 +549,36 @@ exports.bulkUpdateProducts = async (req, res) => {
 // @access  Private/Admin/Product Manager
 exports.uploadProductImage = async (req, res) => {
   try {
-    if (!req.files || !req.files.image) {
+    // Log the received file for debugging
+    logger.debug('Received file:', req.file);
+
+    if (!req.file) {
+      logger.warn('No file uploaded');
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const file = req.files.image;
+    const file = req.file;
 
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(file.tempFilePath, {
-      folder: 'products',
-      width: 800,
-      height: 800,
-      crop: 'fill',
+    // Optional: Further validation can be performed here if necessary
+
+    // Upload the image buffer to Cloudinary
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'products',
+          width: 800,
+          height: 800,
+          crop: 'fill',
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+      stream.end(file.buffer);
     });
+
+    logger.info('Image uploaded to Cloudinary:', result.secure_url);
 
     res.status(200).json({
       success: true,
@@ -339,6 +586,15 @@ exports.uploadProductImage = async (req, res) => {
     });
   } catch (error) {
     logger.error('Upload Product Image Error:', error);
+
+    // Handle Cloudinary errors specifically
+    if (error.name === 'Error' && error.http_code) {
+      return res.status(error.http_code).json({
+        success: false,
+        message: error.message || ERROR_CODES.SERVER_ERROR,
+      });
+    }
+
     res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };

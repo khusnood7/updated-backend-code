@@ -9,6 +9,9 @@ const adminMiddleware = require("../middleware/adminMiddleware");
 const validateMiddleware = require("../middleware/validateMiddleware");
 const USER_ROLES = require("../constants/userRoles");
 
+// Import the product image upload middleware
+const uploadProductImageMiddleware = require('../middleware/uploadProductImageMiddleware');
+
 // Validation rules for creating a product
 const createProductValidation = [
   body("title")
@@ -223,9 +226,10 @@ router.post(
 // Get all products with filtering and pagination
 router.get("/", getAllProductsValidation, productController.getAllProducts);
 
+// Search products
 router.get('/search', productController.searchProducts);
 
-
+// Get a single product by slug
 router.get("/slug/:slug", productController.getProductBySlug);
 
 // Get a single product by ID
@@ -286,11 +290,12 @@ router.post(
   productController.bulkUpdateProducts
 );
 
-// Upload product image
+// Upload product image with product image upload middleware
 router.post(
   "/upload-image",
   authMiddleware,
   adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.PRODUCT_MANAGER]),
+  uploadProductImageMiddleware, // Apply the product image upload middleware
   productController.uploadProductImage
 );
 

@@ -33,6 +33,8 @@ const validateConfig = require('./utils/validateConfig');
 const setupGoogleStrategy = require('./services/googleOAuthService');
 const emailListRoutes = require('./routes/emailListRoutes');
 const chatbotRoutes = require('./routes/chatbotRoutes');
+const tagRoutes = require('./routes/tagRoutes');
+
 
 
 
@@ -49,13 +51,23 @@ const app = express();
 app.use(helmet());
 
 // CORS Middleware
+const allowedOrigins = [
+  process.env.FRONTEND_URL, // Main frontend app
+  process.env.ADMIN_URL // Admin panel
+];
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
   })
 );
-
 // Body Parsing Middleware
 app.use(json());
 app.use(urlencoded({ extended: true }));
@@ -138,6 +150,7 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/review', reviewRoutes);
 app.use('/api/email-list', emailListRoutes);
 app.use('/api/chatbot', chatbotRoutes);
+app.use('/api/tags', tagRoutes);
 
 
 // Serve an HTML file on the root route to indicate the server is running

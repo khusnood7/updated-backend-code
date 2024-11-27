@@ -79,7 +79,7 @@ CouponSchema.methods.applyCoupon = function (orderTotal) {
 
   let discountAmount = 0;
   if (this.discountType === 'percentage') {
-    discountAmount = (orderTotal * this.discount) / 100; // Percentage discount
+    discountAmount = (this.discount / 100) * orderTotal; // Percentage discount
   } else if (this.discountType === 'fixed') {
     discountAmount = this.discount; // Fixed discount
   }

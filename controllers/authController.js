@@ -210,7 +210,7 @@ exports.updateProfile = async (req, res, next) => {
 };
 
 /**
- * @desc    Login user/admin
+ * @desc    Login user/admin with OTP for admin roles
  * @route   POST /api/auth/login
  * @access  Public
  */
@@ -254,6 +254,115 @@ exports.login = async (req, res, next) => {
         .json({ success: false, message: ERROR_CODES.AUTHENTICATION_FAILED });
     }
 
+    // Check if user is an admin
+    const isAdmin = user.role !== 'user';
+
+    if (isAdmin) {
+      // Generate OTP
+      const otp = crypto.randomInt(100000, 999999).toString(); // 6-digit OTP
+      user.otp = otp;
+      user.otpExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+      await user.save();
+
+      // Send OTP via email
+      const templatePath = path.join(__dirname, "../templates/otpEmail.html");
+      const templateSource = fs.readFileSync(templatePath, "utf8");
+      const template = handlebars.compile(templateSource);
+
+      const htmlContent = template({
+        name: user.name,
+        otp,
+      });
+
+      // Define plain text message as a fallback
+      const plainTextMessage = `Hello ${user.name},
+
+Your OTP for admin login is: ${otp}
+
+This OTP is valid for 10 minutes.
+
+If you did not attempt to login, please contact support immediately.
+
+Thank you,
+Your Company Team`;
+
+      await sendEmail({
+        email: user.email,
+        subject: "Admin Login OTP Verification",
+        message: plainTextMessage,
+        html: htmlContent, // Send the HTML content
+      });
+
+      logger.info(`OTP sent to admin user: ${user.email}`);
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP sent to your email. Please verify to complete login.",
+        requiresOTP: true,
+      });
+    }
+
+    // For non-admin users, proceed to issue JWT
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "1h",
+      }
+    );
+
+    logger.info(`User logged in: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      token,
+      data: user,
+    });
+  } catch (error) {
+    logger.error("Login Error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+  }
+};
+
+/**
+ * @desc    Verify OTP for admin login
+ * @route   POST /api/auth/verify-otp
+ * @access  Public
+ */
+exports.verifyOTP = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email and OTP",
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      logger.warn(`OTP Verification failed: No user found with email ${email}`);
+      return res
+        .status(401)
+        .json({ success: false, message: ERROR_CODES.AUTHENTICATION_FAILED });
+    }
+
+    if (user.otp !== otp || user.otpExpire < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP",
+      });
+    }
+
+    // Clear OTP fields
+    user.otp = undefined;
+    user.otpExpire = undefined;
+    await user.save();
+
     // Generate JWT
     const token = jwt.sign(
       { id: user._id, role: user.role },
@@ -263,7 +372,7 @@ exports.login = async (req, res, next) => {
       }
     );
 
-    logger.info(`User logged in: ${email}`);
+    logger.info(`Admin user logged in after OTP verification: ${user.email}`);
 
     res.status(200).json({
       success: true,
@@ -271,7 +380,81 @@ exports.login = async (req, res, next) => {
       data: user,
     });
   } catch (error) {
-    logger.error("Login Error:", error);
+    logger.error("Verify OTP Error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+  }
+};
+
+/**
+ * @desc    Resend OTP for admin login
+ * @route   POST /api/auth/resend-otp
+ * @access  Public
+ */
+exports.resendOTP = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email",
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user || user.role === 'user') {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request",
+      });
+    }
+
+    // Generate new OTP
+    const otp = crypto.randomInt(100000, 999999).toString(); // 6-digit OTP
+    user.otp = otp;
+    user.otpExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+    await user.save();
+
+    // Send OTP via email
+    const templatePath = path.join(__dirname, "../templates/otpEmail.html");
+    const templateSource = fs.readFileSync(templatePath, "utf8");
+    const template = handlebars.compile(templateSource);
+
+    const htmlContent = template({
+      name: user.name,
+      otp,
+    });
+
+    // Define plain text message as a fallback
+    const plainTextMessage = `Hello ${user.name},
+
+Your OTP for admin login is: ${otp}
+
+This OTP is valid for 10 minutes.
+
+If you did not attempt to login, please contact support immediately.
+
+Thank you,
+Your Company Team`;
+
+    await sendEmail({
+      email: user.email,
+      subject: "Admin Login OTP Verification",
+      message: plainTextMessage,
+      html: htmlContent, // Send the HTML content
+    });
+
+    logger.info(`OTP resent to admin user: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: "OTP resent to your email. Please verify to complete login.",
+    });
+  } catch (error) {
+    logger.error("Resend OTP Error:", error);
     res
       .status(500)
       .json({ success: false, message: ERROR_CODES.SERVER_ERROR });

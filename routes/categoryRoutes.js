@@ -1,8 +1,8 @@
-// routes/categoryRoutes.js
+// src/routes/categoryRoutes.js
 
 const express = require('express');
 const router = express.Router();
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const categoryController = require('../controllers/categoryController');
 const authMiddleware = require('../middleware/authMiddleware');
 const adminMiddleware = require('../middleware/adminMiddleware');
@@ -32,7 +32,7 @@ const createCategoryValidation = [
     .isLength({ max: 500 })
     .withMessage('Description cannot exceed 500 characters'),
   body('parent')
-    .optional()
+    .optional({ checkFalsy: true }) // Allows empty strings to be treated as undefined
     .isMongoId()
     .withMessage('Parent must be a valid category ID'),
 ];
@@ -58,7 +58,7 @@ const updateCategoryValidation = [
     .isLength({ max: 500 })
     .withMessage('Description cannot exceed 500 characters'),
   body('parent')
-    .optional()
+    .optional({ checkFalsy: true }) // Allows empty strings to be treated as undefined
     .isMongoId()
     .withMessage('Parent must be a valid category ID'),
   body('isActive')
@@ -67,14 +67,43 @@ const updateCategoryValidation = [
     .withMessage('isActive must be a boolean value'),
 ];
 
+// Validation rules for query parameters in GET /api/categories
+const getAllCategoriesValidation = [
+  query('type')
+    .optional({ checkFalsy: true }) // Treat empty strings as undefined
+    .isIn(['product', 'blog'])
+    .withMessage('Type must be either product or blog'),
+  query('page')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Page must be an integer greater than 0'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Limit must be an integer greater than 0'),
+  query('search')
+    .optional()
+    .isString()
+    .withMessage('Search must be a string'),
+  query('exclude')
+    .optional()
+    .isMongoId()
+    .withMessage('Exclude must be a valid category ID'),
+];
+
 // Routes
 
 /**
  * @route   GET /api/categories
- * @desc    Get all categories, optionally filtered by type
+ * @desc    Get all categories, optionally filtered by type, search, paginated
  * @access  Public
  */
-router.get('/', categoryController.getAllCategories);
+router.get(
+  '/',
+  getAllCategoriesValidation,
+  validateMiddleware,
+  categoryController.getAllCategories
+);
 
 /**
  * @route   GET /api/categories/:id
