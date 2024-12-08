@@ -8,6 +8,8 @@ const authMiddleware = require('../middleware/authMiddleware');
 const adminMiddleware = require('../middleware/adminMiddleware');
 const validateMiddleware = require('../middleware/validateMiddleware');
 const USER_ROLES = require('../constants/userRoles');
+const existingUploadMiddleware = require('../middleware/uploadMiddleware'); // Existing upload middleware
+const blogUploadMiddleware = require('../middleware/blogUploadMiddleware'); // New blog upload middleware
 
 // Validation rules for creating a blog post
 const createBlogPostValidation = [
@@ -187,7 +189,7 @@ router.delete(
   blogController.deleteBlogPost
 );
 
-// Upload blog post image
+// Upload blog post image with the new blog upload middleware
 router.post(
   '/upload-image',
   authMiddleware,
@@ -195,6 +197,7 @@ router.post(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.CONTENT_MANAGER,
   ]),
+  ...blogUploadMiddleware, // Spread the array to apply both middlewares
   blogController.uploadBlogImage
 );
 

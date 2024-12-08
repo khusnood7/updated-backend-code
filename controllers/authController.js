@@ -121,9 +121,7 @@ exports.register = async (req, res, next) => {
     });
   } catch (error) {
     logger.error("Register Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -203,9 +201,7 @@ exports.updateProfile = async (req, res, next) => {
     });
   } catch (error) {
     logger.error("Update Profile Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -255,7 +251,7 @@ exports.login = async (req, res, next) => {
     }
 
     // Check if user is an admin
-    const isAdmin = user.role !== 'user';
+    const isAdmin = user.role !== "user";
 
     if (isAdmin) {
       // Generate OTP
@@ -320,9 +316,7 @@ Your Company Team`;
     });
   } catch (error) {
     logger.error("Login Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -381,9 +375,7 @@ exports.verifyOTP = async (req, res, next) => {
     });
   } catch (error) {
     logger.error("Verify OTP Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -405,7 +397,7 @@ exports.resendOTP = async (req, res, next) => {
 
     const user = await User.findOne({ email });
 
-    if (!user || user.role === 'user') {
+    if (!user || user.role === "user") {
       return res.status(400).json({
         success: false,
         message: "Invalid request",
@@ -455,9 +447,7 @@ Your Company Team`;
     });
   } catch (error) {
     logger.error("Resend OTP Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -481,9 +471,7 @@ exports.getMe = async (req, res, next) => {
     });
   } catch (error) {
     logger.error("Get Me Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -500,7 +488,9 @@ exports.forgotPassword = async (req, res, next) => {
     // Find the user by email
     const user = await User.findOne({ email: req.body.email });
     if (!user) {
-      logger.warn(`Forgot Password: No user found with email ${req.body.email}`);
+      logger.warn(
+        `Forgot Password: No user found with email ${req.body.email}`
+      );
       return res
         .status(404)
         .json({ success: false, message: "There is no user with that email" });
@@ -574,9 +564,7 @@ exports.forgotPassword = async (req, res, next) => {
     }
   } catch (error) {
     logger.error("Forgot Password Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -655,9 +643,7 @@ exports.resetPassword = async (req, res, next) => {
     });
   } catch (error) {
     logger.error("Reset Password Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -675,9 +661,7 @@ exports.logout = async (req, res, next) => {
     res.status(200).json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     logger.error("Logout Error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: ERROR_CODES.SERVER_ERROR });
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };
 
@@ -691,8 +675,12 @@ exports.requestAccountDeletion = async (req, res, next) => {
     const user = await User.findById(req.user.id);
 
     if (!user) {
-      logger.warn(`Request Account Deletion: User not found with ID ${req.user.id}`);
-      return res.status(404).json({ success: false, message: "User not found" });
+      logger.warn(
+        `Request Account Deletion: User not found with ID ${req.user.id}`
+      );
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     // Generate a unique deletion token
@@ -714,7 +702,10 @@ exports.requestAccountDeletion = async (req, res, next) => {
     const deleteUrl = `${frontendURL}/confirm-delete/${deletionToken}`;
 
     // Load and compile the HTML template
-    const templatePath = path.join(__dirname, "../templates/accountDeletion.html");
+    const templatePath = path.join(
+      __dirname,
+      "../templates/accountDeletion.html"
+    );
     const templateSource = fs.readFileSync(templatePath, "utf8");
     const template = handlebars.compile(templateSource);
 
@@ -748,7 +739,8 @@ Your Company Team`;
 
     res.status(200).json({
       success: true,
-      message: "Account deletion confirmation email sent. Please check your inbox.",
+      message:
+        "Account deletion confirmation email sent. Please check your inbox.",
     });
   } catch (error) {
     logger.error("Request Account Deletion Error:", error);
@@ -767,7 +759,9 @@ exports.confirmAccountDeletion = async (req, res, next) => {
 
     if (!token) {
       logger.warn("Confirm Account Deletion: No token provided");
-      return res.status(400).json({ success: false, message: "Invalid or missing token" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid or missing token" });
     }
 
     // Hash the received token
@@ -781,7 +775,9 @@ exports.confirmAccountDeletion = async (req, res, next) => {
 
     if (!user) {
       logger.warn(`Confirm Account Deletion: Invalid or expired token`);
-      return res.status(400).json({ success: false, message: "Invalid or expired token" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid or expired token" });
     }
 
     // Delete related data

@@ -70,7 +70,7 @@ const BlogPostSchema = new mongoose.Schema(
       description: {
         type: String,
         default: function () {
-          return `${this.title} - A blog post on ${this.categories.map(cat => cat.name).join(', ')}.`; // This will be updated in the pre-save hook
+          return `${this.title} - A blog post on ${this.categories.map(cat => cat.name).join(', ')}.`;
         },
       },
       keywords: {

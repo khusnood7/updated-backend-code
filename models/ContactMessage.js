@@ -37,15 +37,6 @@ const ContactMessageSchema = new mongoose.Schema(
       enum: ['new', 'in-progress', 'resolved'],
       default: 'new',
     },
-    assignedTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
-    deleted: {
-      type: Boolean,
-      default: false,
-    },
     responses: [
       {
         responder: {
@@ -66,6 +57,10 @@ const ContactMessageSchema = new mongoose.Schema(
         },
       },
     ],
+    deleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true, // Automatically adds createdAt and updatedAt fields

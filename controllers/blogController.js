@@ -3,17 +3,17 @@
 const BlogPost = require('../models/BlogPost');
 const Category = require('../models/Category');
 const Tag = require('../models/Tag');
-const User = require('../models/User'); // Ensure User model is imported
-const logger = require('../utils/logger');
-const MESSAGES = require('../messages/en');
-const ERROR_CODES = require('../constants/errorCodes');
 const asyncHandler = require('express-async-handler');
 const slugify = require('slugify');
 const { uploadToCloudinary } = require('../services/uploadService');
+const MESSAGES = require('../messages/en');
+const logger = require('../utils/logger');
 
-// @desc    Create a new blog post
-// @route   POST /api/blogs
-// @access  Private/Admin/Content Manager
+/**
+ * @desc    Create a new blog post
+ * @route   POST /api/blogs
+ * @access  Private/Admin/Content Manager
+ */
 exports.createBlogPost = asyncHandler(async (req, res, next) => {
   const { title, content, categories, tags, status, images } = req.body;
 
@@ -35,6 +35,8 @@ exports.createBlogPost = asyncHandler(async (req, res, next) => {
 
   const slug = slugify(title, { lower: true, strict: true });
 
+  const categoryNames = await getCategoryNames(categories); // Returns an array
+
   const blogPost = await BlogPost.create({
     title,
     slug,
@@ -46,8 +48,8 @@ exports.createBlogPost = asyncHandler(async (req, res, next) => {
     author: req.user._id,
     meta: {
       title,
-      description: `${title} - A blog post on ${await getCategoryNames(categories)}.`,
-      keywords: [title, 'blog', ...await getCategoryNames(categories)],
+      description: `${title} - A blog post on ${categoryNames.join(', ')}.`,
+      keywords: [title, 'blog', ...categoryNames],
     },
   });
 
@@ -58,15 +60,22 @@ exports.createBlogPost = asyncHandler(async (req, res, next) => {
   });
 });
 
-// Helper function to get category names
+/**
+ * Helper function to retrieve category names.
+ * @param {Array} categoryIds - Array of category IDs.
+ * @returns {Array} - Array of category names.
+ */
 const getCategoryNames = async (categoryIds) => {
+  if (!categoryIds || categoryIds.length === 0) return [];
   const categories = await Category.find({ _id: { $in: categoryIds } });
   return categories.map(cat => cat.name);
 };
 
-// @desc    Get all blog posts with optional filters
-// @route   GET /api/blogs
-// @access  Public
+/**
+ * @desc    Get all blog posts with optional filters
+ * @route   GET /api/blogs
+ * @access  Public
+ */
 exports.getAllBlogPosts = asyncHandler(async (req, res, next) => {
   const { status, category, tags, page = 1, limit = 10 } = req.query;
   let filter = {};
@@ -121,9 +130,11 @@ exports.getAllBlogPosts = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc    Get a single blog post by ID
-// @route   GET /api/blogs/:id
-// @access  Public
+/**
+ * @desc    Get a single blog post by ID
+ * @route   GET /api/blogs/:id
+ * @access  Public
+ */
 exports.getBlogPostById = asyncHandler(async (req, res, next) => {
   const blogPost = await BlogPost.findById(req.params.id)
     .populate('categories', 'name')
@@ -141,9 +152,11 @@ exports.getBlogPostById = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc    Get a single blog post by slug
-// @route   GET /api/blogs/slug/:slug
-// @access  Public
+/**
+ * @desc    Get a single blog post by slug
+ * @route   GET /api/blogs/slug/:slug
+ * @access  Public
+ */
 exports.getBlogPostBySlug = asyncHandler(async (req, res, next) => {
   const blogPost = await BlogPost.findOne({ slug: req.params.slug })
     .populate('categories', 'name')
@@ -161,9 +174,11 @@ exports.getBlogPostBySlug = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc    Update an existing blog post
-// @route   PUT /api/blogs/:id
-// @access  Private/Admin/Content Manager
+/**
+ * @desc    Update an existing blog post
+ * @route   PUT /api/blogs/:id
+ * @access  Private/Admin/Content Manager
+ */
 exports.updateBlogPost = asyncHandler(async (req, res, next) => {
   const { title, content, categories, tags, status, images } = req.body;
 
@@ -201,9 +216,10 @@ exports.updateBlogPost = asyncHandler(async (req, res, next) => {
 
   // Update meta fields if categories or title have changed
   if (title || categories) {
+    const categoryNames = await getCategoryNames(blogPost.categories); // returns array
     blogPost.meta.title = title || blogPost.meta.title;
-    blogPost.meta.description = `${blogPost.title} - A blog post on ${await getCategoryNames(blogPost.categories)}.`;
-    blogPost.meta.keywords = [blogPost.title, 'blog', ...(await getCategoryNames(blogPost.categories)).split(', ')];
+    blogPost.meta.description = `${blogPost.title} - A blog post on ${categoryNames.join(', ')}.`;
+    blogPost.meta.keywords = [blogPost.title, 'blog', ...categoryNames];
   }
 
   await blogPost.save();
@@ -215,9 +231,11 @@ exports.updateBlogPost = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc    Delete a blog post
-// @route   DELETE /api/blogs/:id
-// @access  Private/Admin/Content Manager
+/**
+ * @desc    Delete a blog post
+ * @route   DELETE /api/blogs/:id
+ * @access  Private/Admin/Content Manager
+ */
 exports.deleteBlogPost = asyncHandler(async (req, res, next) => {
   const blogPost = await BlogPost.findById(req.params.id);
 
@@ -225,7 +243,8 @@ exports.deleteBlogPost = asyncHandler(async (req, res, next) => {
     return res.status(404).json({ success: false, message: MESSAGES.BLOG.BLOG_NOT_FOUND });
   }
 
-  await blogPost.remove();
+  // Updated deletion method
+  await blogPost.deleteOne();
 
   res.status(200).json({
     success: true,
@@ -233,20 +252,26 @@ exports.deleteBlogPost = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc    Upload an image for a blog post
-// @route   POST /api/blogs/upload-image
-// @access  Private/Admin/Content Manager
+/**
+ * @desc    Upload an image for a blog post
+ * @route   POST /api/blogs/upload-image
+ * @access  Private/Admin/Content Manager
+ */
 exports.uploadBlogImage = asyncHandler(async (req, res, next) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No image file provided.' });
   }
 
   const folder = 'blog_images';
-  const imageUrl = await uploadToCloudinary(req.file.path, folder);
-
-  res.status(200).json({
-    success: true,
-    data: { imageUrl },
-    message: MESSAGES.BLOG.UPLOAD_SUCCESS,
-  });
+  try {
+    const imageUrl = await uploadToCloudinary(req.file.buffer, folder);
+    res.status(200).json({
+      success: true,
+      data: { imageUrl },
+      message: MESSAGES.BLOG.UPLOAD_SUCCESS,
+    });
+  } catch (error) {
+    logger.error('Image Upload Error:', error);
+    res.status(500).json({ success: false, message: 'Image upload failed.' });
+  }
 });

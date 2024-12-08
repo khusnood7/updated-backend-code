@@ -1,3 +1,5 @@
+// controllers/productController.js
+
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const Tag = require('../models/Tag'); // Assuming you have a Tag model
@@ -5,9 +7,11 @@ const cloudinary = require('../config/cloudinary');
 const logger = require('../utils/logger');
 const ERROR_CODES = require('../constants/errorCodes');
 
-// @desc    Create a new product
-// @route   POST /api/products
-// @access  Private/Admin/Product Manager
+/**
+ * @desc    Create a new product
+ * @route   POST /api/products
+ * @access  Private/Admin/Product Manager
+ */
 exports.createProduct = async (req, res) => {
   try {
     // Destructure fields from the request body
@@ -17,7 +21,7 @@ exports.createProduct = async (req, res) => {
       stock,
       description,
       category,
-      tags, // Expected to be an array of tag names or IDs
+      tags, // Expected to be an array of Tag IDs
       discountPercentage,
       brand,
       accordion,
@@ -51,8 +55,8 @@ exports.createProduct = async (req, res) => {
     // Validate and convert tags to ObjectIds
     let tagIds = [];
     if (tags && Array.isArray(tags)) {
-      // Assuming tags are sent as names. If they're sent as IDs, adjust accordingly.
-      const foundTags = await Tag.find({ name: { $in: tags } });
+      // Now, assuming tags are sent as IDs
+      const foundTags = await Tag.find({ _id: { $in: tags } });
       if (foundTags.length !== tags.length) {
         return res.status(400).json({
           success: false,
@@ -82,7 +86,7 @@ exports.createProduct = async (req, res) => {
     // Save the product to the database
     await product.save();
 
-    // Log the creation in AuditLog if applicable
+    // Optional: Log the creation in AuditLog
     // await AuditLog.create({
     //   performedBy: req.user._id, // Assuming you have user info in req.user
     //   entityId: product._id,
@@ -115,13 +119,19 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// @desc    Upload product image
-// @route   POST /api/products/upload-image
-// @access  Private/Admin/Product Manager
+/**
+ * @desc    Upload product image
+ * @route   POST /api/products/upload-image
+ * @access  Private/Admin/Product Manager
+ */
 exports.uploadProductImage = async (req, res) => {
   try {
+    // Log the received file for debugging
+    logger.debug('Received file:', req.file);
+
     // Ensure that the file was uploaded
     if (!req.file) {
+      logger.warn('No file uploaded');
       return res.status(400).json({
         success: false,
         message: 'No file uploaded. Please upload an image with the field name "image".',
@@ -170,9 +180,11 @@ exports.uploadProductImage = async (req, res) => {
   }
 };
 
-// @desc    Get a single product by ID
-// @route   GET /api/products/:id
-// @access  Public/Admin
+/**
+ * @desc    Get a single product by ID
+ * @route   GET /api/products/:id
+ * @access  Public/Admin
+ */
 exports.getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id).populate('tags'); // Populating 'tags' as it's defined in the schema
@@ -191,9 +203,11 @@ exports.getProductById = async (req, res) => {
   }
 };
 
-// @desc    Get a single product by Slug
-// @route   GET /api/products/slug/:slug
-// @access  Public
+/**
+ * @desc    Get a single product by Slug
+ * @route   GET /api/products/slug/:slug
+ * @access  Public
+ */
 exports.getProductBySlug = async (req, res) => {
   try {
     const product = await Product.findOne({ slug: req.params.slug }).populate('tags'); // Populating 'tags'
@@ -212,9 +226,11 @@ exports.getProductBySlug = async (req, res) => {
   }
 };
 
-// @desc    Search products by query
-// @route   GET /api/products/search
-// @access  Public
+/**
+ * @desc    Search products by query
+ * @route   GET /api/products/search
+ * @access  Public
+ */
 exports.searchProducts = async (req, res) => {
   try {
     const { query } = req.query;
@@ -226,7 +242,9 @@ exports.searchProducts = async (req, res) => {
     // Perform case-insensitive search on product titles
     const regex = new RegExp(query, 'i');
 
-    const products = await Product.find({ title: regex, isActive: true }).limit(10).populate('tags');
+    const products = await Product.find({ title: regex, isActive: true })
+      .limit(10)
+      .populate('tags');
 
     res.status(200).json({
       success: true,
@@ -238,9 +256,11 @@ exports.searchProducts = async (req, res) => {
   }
 };
 
-// @desc    Get all products with filters and pagination
-// @route   GET /api/products
-// @access  Public/Admin
+/**
+ * @desc    Get all products with filters and pagination
+ * @route   GET /api/products
+ * @access  Public/Admin
+ */
 exports.getAllProducts = async (req, res) => {
   try {
     const {
@@ -313,9 +333,11 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-// @desc    Update a product by ID
-// @route   PUT /api/products/:id
-// @access  Private/Admin/Product Manager
+/**
+ * @desc    Update a product by ID
+ * @route   PUT /api/products/:id
+ * @access  Private/Admin/Product Manager
+ */
 exports.updateProduct = async (req, res) => {
   try {
     const updates = req.body;
@@ -329,7 +351,8 @@ exports.updateProduct = async (req, res) => {
 
     // If tags are being updated, convert them to ObjectIds
     if (updates.tags && Array.isArray(updates.tags)) {
-      const foundTags = await Tag.find({ name: { $in: updates.tags } });
+      // Now, assuming tags are sent as IDs
+      const foundTags = await Tag.find({ _id: { $in: updates.tags } });
       if (foundTags.length !== updates.tags.length) {
         return res.status(400).json({
           success: false,
@@ -360,7 +383,7 @@ exports.updateProduct = async (req, res) => {
 
     await product.save();
 
-    // Log the update in AuditLog if applicable
+    // Optional: Log the update in AuditLog
     // await AuditLog.create({
     //   performedBy: req.user._id,
     //   entityId: product._id,
@@ -393,9 +416,11 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
-// @desc    Delete (deactivate) a product by ID
-// @route   DELETE /api/products/:id
-// @access  Private/Admin/Product Manager
+/**
+ * @desc    Delete (deactivate) a product by ID
+ * @route   DELETE /api/products/:id
+ * @access  Private/Admin/Product Manager
+ */
 exports.deleteProduct = async (req, res) => {
   try {
     const productId = req.params.id;
@@ -409,7 +434,7 @@ exports.deleteProduct = async (req, res) => {
     product.isActive = false; // Soft delete
     await product.save();
 
-    // Log the deletion in AuditLog if applicable
+    // Optional: Log the deletion in AuditLog
     // await AuditLog.create({
     //   performedBy: req.user._id,
     //   entityId: product._id,
@@ -428,9 +453,11 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-// @desc    Update product stock level
-// @route   PUT /api/products/:id/stock
-// @access  Private/Admin/Product Manager
+/**
+ * @desc    Update product stock level
+ * @route   PUT /api/products/:id/stock
+ * @access  Private/Admin/Product Manager
+ */
 exports.updateProductStock = async (req, res) => {
   try {
     const { stock } = req.body;
@@ -445,7 +472,7 @@ exports.updateProductStock = async (req, res) => {
     product.stock = stock;
     await product.save();
 
-    // Log the stock update in AuditLog if applicable
+    // Optional: Log the stock update in AuditLog
     // await AuditLog.create({
     //   performedBy: req.user._id,
     //   entityId: product._id,
@@ -464,9 +491,11 @@ exports.updateProductStock = async (req, res) => {
   }
 };
 
-// @desc    Bulk update products
-// @route   POST /api/products/bulk-update
-// @access  Private/Admin/Product Manager
+/**
+ * @desc    Bulk update products
+ * @route   POST /api/products/bulk-update
+ * @access  Private/Admin/Product Manager
+ */
 exports.bulkUpdateProducts = async (req, res) => {
   try {
     const { updates } = req.body; // Array of { id, fields to update }
@@ -493,7 +522,8 @@ exports.bulkUpdateProducts = async (req, res) => {
 
       // If tags are being updated, convert them to ObjectIds
       if (fields.tags && Array.isArray(fields.tags)) {
-        const foundTags = await Tag.find({ name: { $in: fields.tags } });
+        // Now, assuming tags are sent as IDs
+        const foundTags = await Tag.find({ _id: { $in: fields.tags } });
         if (foundTags.length !== fields.tags.length) {
           return res.status(400).json({
             success: false,
@@ -524,7 +554,7 @@ exports.bulkUpdateProducts = async (req, res) => {
     // Execute bulk operations
     const result = await Product.bulkWrite(bulkOps);
 
-    // Log the bulk update in AuditLog if applicable
+    // Optional: Log the bulk update in AuditLog
     // await AuditLog.create({
     //   performedBy: req.user._id,
     //   entityId: null, // Since multiple products are updated
@@ -540,61 +570,6 @@ exports.bulkUpdateProducts = async (req, res) => {
     });
   } catch (error) {
     logger.error('Bulk Update Products Error:', error);
-    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
-  }
-};
-
-// @desc    Upload product image
-// @route   POST /api/products/upload-image
-// @access  Private/Admin/Product Manager
-exports.uploadProductImage = async (req, res) => {
-  try {
-    // Log the received file for debugging
-    logger.debug('Received file:', req.file);
-
-    if (!req.file) {
-      logger.warn('No file uploaded');
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
-    }
-
-    const file = req.file;
-
-    // Optional: Further validation can be performed here if necessary
-
-    // Upload the image buffer to Cloudinary
-    const result = await new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'products',
-          width: 800,
-          height: 800,
-          crop: 'fill',
-        },
-        (error, result) => {
-          if (error) return reject(error);
-          resolve(result);
-        }
-      );
-      stream.end(file.buffer);
-    });
-
-    logger.info('Image uploaded to Cloudinary:', result.secure_url);
-
-    res.status(200).json({
-      success: true,
-      data: result.secure_url,
-    });
-  } catch (error) {
-    logger.error('Upload Product Image Error:', error);
-
-    // Handle Cloudinary errors specifically
-    if (error.name === 'Error' && error.http_code) {
-      return res.status(error.http_code).json({
-        success: false,
-        message: error.message || ERROR_CODES.SERVER_ERROR,
-      });
-    }
-
     res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };

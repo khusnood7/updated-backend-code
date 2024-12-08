@@ -34,7 +34,7 @@ const encrypt = (text) => {
 exports.createOrder = asyncHandler(async (req, res, next) => {
   const { items, shippingAddress, billingAddress, paymentMethod, couponCode } = req.body;
 
-  if (!items || items.length === 0) {
+  if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ success: false, message: 'No items provided for the order.' });
   }
 
@@ -46,14 +46,22 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
     const product = await Product.findById(item.product);
 
     if (!product || !product.isActive) {
+      logger.warn(`Invalid product ID ${item.product} for order creation.`);
       return res.status(400).json({ success: false, message: `Product with ID ${item.product} is invalid.` });
+    }
+
+    // Check if 'variants' field exists and is an array
+    if (!product.variants || !Array.isArray(product.variants) || product.variants.length === 0) {
+      logger.warn(`Product ${product._id} (${product.title}) has undefined or invalid 'variants' field.`);
+      return res.status(400).json({ success: false, message: `Product ${product.title} has invalid variants.` });
     }
 
     // Validate variant
     const selectedVariant = product.variants.find(
-      (v) => v.size === item.variant
+      (v) => v.size.toLowerCase() === item.variant.toLowerCase()
     );
     if (!selectedVariant) {
+      logger.warn(`Variant ${item.variant} not found for product ${product.title}.`);
       return res.status(400).json({
         success: false,
         message: `Variant ${item.variant} not found for product ${product.title}.`,
@@ -62,14 +70,16 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
 
     // Validate packaging
     if (!product.packaging.includes(item.packaging)) {
+      logger.warn(`Packaging ${item.packaging} not valid for product ${product.title}.`);
       return res.status(400).json({
         success: false,
-        message: `Packaging ${item.packaging} not valid for product ${product.title}.`,
+        message: `Packaging ${item.packaging} is not available for product ${product.title}.`,
       });
     }
 
     // Check stock
     if (selectedVariant.stock < item.quantity) {
+      logger.warn(`Insufficient stock for product ${product.title}, variant ${item.variant}. Requested: ${item.quantity}, Available: ${selectedVariant.stock}`);
       return res.status(400).json({
         success: false,
         message: `Insufficient stock for product ${product.title}, variant ${item.variant}.`,
@@ -85,7 +95,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
       product: product._id,
       quantity: item.quantity,
       price: selectedVariant.price,
-      variant: item.variant,
+      variant: selectedVariant.size,
       packaging: item.packaging,
     });
   }
@@ -96,12 +106,14 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
     const coupon = await Coupon.findOne({ code: couponCode, isActive: true });
 
     if (!coupon) {
+      logger.warn(`Invalid or inactive coupon code: ${couponCode}`);
       return res.status(400).json({ success: false, message: 'Invalid or inactive coupon code.' });
     }
 
     // Validate coupon usage
     const couponValidation = Coupon.canApplyCoupon(coupon);
     if (!couponValidation.success) {
+      logger.warn(`Coupon validation failed: ${couponValidation.message}`);
       return res.status(400).json({ success: false, message: couponValidation.message });
     }
 
@@ -133,7 +145,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
     shippingAddress,
     billingAddress,
     status: 'pending', // Set to 'pending' initially
-    paymentStatus: paymentMethod === 'cod' || paymentMethod === 'cash_on_delivery' ? 'pending' : 'pending', // Payment status remains 'pending' until order is accepted
+    paymentStatus: paymentMethod.toLowerCase() === 'cod' || paymentMethod.toLowerCase() === 'cash_on_delivery' ? 'pending' : 'pending', // Payment status remains 'pending' until order is accepted
     discount,
     couponCode: couponCode || null,
   });
@@ -319,7 +331,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
         ${discount > 0 ? `<p><strong>Discount:</strong> -$${discount.toFixed(2)}</p>` : ''}
         <p><strong>Total Amount:</strong> $${totalAmount.toFixed(2)}</p>
 
-        <p>Your order status is currently: <strong>${order.status}</strong>.</p>
+        <p>Your order status is currently: <strong>${capitalize(order.status)}</strong>.</p>
 
         <p>If you have any questions or need further assistance, feel free to <a href="${process.env.SUPPORT_URL || 'http://localhost:5173/contact'}">contact our support team</a>.</p>
 
@@ -375,6 +387,7 @@ exports.acceptOrder = asyncHandler(async (req, res, next) => {
     .populate('items.product', 'title thumbnail variants');
 
   if (!order) {
+    logger.warn(`Order with ID ${req.params.id} not found.`);
     return res.status(404).json({
       success: false,
       message: MESSAGES.ORDER.ORDER_NOT_FOUND || 'Order not found.',
@@ -382,6 +395,7 @@ exports.acceptOrder = asyncHandler(async (req, res, next) => {
   }
 
   if (order.status !== 'pending') {
+    logger.warn(`Attempted to accept order ${order._id} with status ${order.status}.`);
     return res.status(400).json({
       success: false,
       message: `Only orders with 'pending' status can be accepted.`,
@@ -397,10 +411,23 @@ exports.acceptOrder = asyncHandler(async (req, res, next) => {
     await Promise.all(
       order.items.map(async (item) => {
         const product = await Product.findById(item.product._id);
-        const variant = product.variants.find(v => v.size === item.variant);
+        if (!product) {
+          throw new Error(`Product with ID ${item.product._id} not found.`);
+        }
+
+        if (!product.variants || !Array.isArray(product.variants)) {
+          throw new Error(`Product ${product.title} has invalid variants.`);
+        }
+
+        const variant = product.variants.find(v => v.size.toLowerCase() === item.variant.toLowerCase());
+        if (!variant) {
+          throw new Error(`Variant ${item.variant} not found for product ${product.title}.`);
+        }
+
         if (variant.stock < item.quantity) {
           throw new Error(`Insufficient stock for product ${product.title}, variant ${item.variant}.`);
         }
+
         variant.stock -= item.quantity;
         await product.save();
       })
@@ -598,7 +625,7 @@ exports.acceptOrder = asyncHandler(async (req, res, next) => {
         ${order.discount > 0 ? `<p><strong>Discount:</strong> -$${order.discount.toFixed(2)}</p>` : ''}
         <p><strong>Total Amount:</strong> $${order.totalAmount.toFixed(2)}</p>
 
-        <p>Your order status is currently: <strong>${order.status}</strong>.</p>
+        <p>Your order status is currently: <strong>${capitalize(order.status)}</strong>.</p>
 
         <p>If you have any questions or need further assistance, feel free to <a href="${process.env.SUPPORT_URL || 'http://localhost:5173/contact'}">contact our support team</a>.</p>
 
@@ -654,10 +681,10 @@ exports.updateOrderStatus = asyncHandler(async (req, res, next) => {
     });
   }
 
-  // Define allowed status transitions
+  // Define allowed status transitions (Extended to include additional transitions)
   const allowedTransitions = {
-    pending: ['processing', 'cancelled'],
-    processing: ['shipped', 'cancelled'],
+    pending: ['processing', 'shipped', 'delivered', 'cancelled'],
+    processing: ['shipped', 'delivered', 'cancelled'],
     shipped: ['delivered', 'refunded'],
     delivered: ['refunded'],
     cancelled: [],
@@ -684,8 +711,6 @@ exports.updateOrderStatus = asyncHandler(async (req, res, next) => {
 
     // Send Order Delivered Email
     try {
-      logger.info(`Attempting to send delivery email to ${order.customer.email} for Order ID ${order._id}.`);
-
       const emailHtml = `
       <!DOCTYPE html>
       <html lang="en">
@@ -863,7 +888,7 @@ exports.updateOrderStatus = asyncHandler(async (req, res, next) => {
           ${order.discount > 0 ? `<p><strong>Discount:</strong> -$${order.discount.toFixed(2)}</p>` : ''}
           <p><strong>Total Amount:</strong> $${order.totalAmount.toFixed(2)}</p>
 
-          <p>Your order status is currently: <strong>${order.status}</strong>.</p>
+          <p>Your order status is currently: <strong>${capitalize(order.status)}</strong>.</p>
 
           <p>If you have any questions or need further assistance, feel free to <a href="${process.env.SUPPORT_URL || 'http://localhost:5173/contact'}">contact our support team</a>.</p>
 
@@ -935,10 +960,22 @@ exports.cancelOrder = asyncHandler(async (req, res, next) => {
   if (['processing', 'shipped', 'delivered'].includes(order.status)) {
     await Promise.all(
       order.items.map(async (item) => {
-        await Product.updateOne(
-          { _id: item.product, 'variants.size': item.variant },
-          { $inc: { 'variants.$.stock': item.quantity } }
-        );
+        const product = await Product.findById(item.product._id);
+        if (!product) {
+          throw new Error(`Product with ID ${item.product._id} not found.`);
+        }
+
+        if (!product.variants || !Array.isArray(product.variants)) {
+          throw new Error(`Product ${product.title} has invalid variants.`);
+        }
+
+        const variant = product.variants.find(v => v.size.toLowerCase() === item.variant.toLowerCase());
+        if (!variant) {
+          throw new Error(`Variant ${item.variant} not found for product ${product.title}.`);
+        }
+
+        variant.stock += item.quantity;
+        await product.save();
       })
     );
   }
@@ -1040,6 +1077,22 @@ exports.cancelOrder = asyncHandler(async (req, res, next) => {
           background: #0041c4;
           transform: translateY(-2px);
           box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .order-summary {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 20px;
+        }
+
+        .order-summary th, .order-summary td {
+          border: 1px solid #e0e0e0;
+          padding: 10px;
+          text-align: left;
+        }
+
+        .order-summary th {
+          background-color: #f9f9f9;
         }
 
         .footer {
@@ -1161,10 +1214,10 @@ exports.getAllOrders = asyncHandler(async (req, res, next) => {
       message: MESSAGES.ORDER.FETCH_SUCCESS || 'Orders fetched successfully.',
     });
   } catch (error) {
-    console.error('Error in getAllOrders:', error);
+    logger.error(`Error fetching all orders: ${error.message}`, { timestamp: new Date().toISOString() });
     res.status(500).json({
       success: false,
-      message: error.message || "Cannot read properties of undefined (reading 'map')",
+      message: error.message || "An unexpected error occurred.",
       errorDetails: error.stack || null,
     });
   }
@@ -1209,10 +1262,10 @@ exports.getMyOrders = asyncHandler(async (req, res, next) => {
       message: 'Orders fetched successfully.',
     });
   } catch (error) {
-    console.error('Error in getMyOrders:', error);
+    logger.error(`Error fetching user's orders: ${error.message}`, { timestamp: new Date().toISOString() });
     res.status(500).json({
       success: false,
-      message: error.message || "Cannot read properties of undefined (reading 'map')",
+      message: error.message || "An unexpected error occurred.",
       errorDetails: error.stack || null,
     });
   }
@@ -1229,6 +1282,7 @@ exports.getOrderById = asyncHandler(async (req, res, next) => {
     .populate('items.product', 'title thumbnail'); // Changed 'images' to 'thumbnail'
 
   if (!order) {
+    logger.warn(`Order with ID ${req.params.id} not found.`);
     return res.status(404).json({
       success: false,
       message: MESSAGES.ORDER.ORDER_NOT_FOUND || 'Order not found.',
@@ -1237,6 +1291,7 @@ exports.getOrderById = asyncHandler(async (req, res, next) => {
 
   // If the user is a customer, ensure they own the order
   if (req.user.role === 'user' && String(order.customer._id) !== String(req.user._id)) {
+    logger.warn(`User ${req.user._id} attempted to access order ${order._id} not owned by them.`);
     return res.status(403).json({
       success: false,
       message: MESSAGES.GENERAL.FORBIDDEN || 'Access forbidden.',
