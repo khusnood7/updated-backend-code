@@ -11,7 +11,7 @@ const { createObjectCsvStringifier } = require("csv-writer");
 const jwt = require("jsonwebtoken");
 const { generateToken } = require("../utils/generateToken"); // Token generator utility
 const { sendInvitationEmail } = require("../services/emailService"); // Email service utility
-
+const ProductPurchase = require('../models/ProductPurchase');
 // Define allowed actions for AuditLog
 const ALLOWED_AUDIT_ACTIONS = ["CREATE", "UPDATE", "DELETE", "RESTORE"];
 
@@ -198,6 +198,13 @@ exports.signupViaInvite = async (req, res) => {
           success: false,
           message: "A user with this email already exists.",
         });
+    }
+
+    // Validate password and confirmPassword
+    if (password !== confirmPassword) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Passwords do not match." });
     }
 
     // Create the user
@@ -835,59 +842,108 @@ exports.getUserAuditLogs = async (req, res) => {
 };
 
 /**
- * @desc    Send an email invitation to register a new user
- * @route   POST /api/users/admin/users/invite
+ * @desc    Count new users
+ * @route   GET /api/users/admin/users/count-new
  * @access  Private/Admin
  */
-exports.inviteUser = async (req, res) => {
+exports.countNewUsers = async (req, res) => {
   try {
-    const { email, role } = req.body;
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "User with this email already exists",
-        });
+    // Define the period for new users, e.g., last 30 days
+    const days = req.query.days ? parseInt(req.query.days) : 30;
+    if (isNaN(days) || days <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid 'days' parameter. It must be a positive integer.",
+      });
     }
 
-    // Generate a unique invitation token
-    const token = generateToken({ email, role }, "1d"); // Token valid for 1 day
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - days);
 
-    // Create an Invite entry
-    const invite = await Invite.create({
-      email,
-      role,
-      token,
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 1 day
-    });
+    const count = await User.countDocuments({ createdAt: { $gte: sinceDate } });
 
-    // Send invitation email
-    await sendInvitationEmail(email, token, role);
-
-    // Log the invitation action in AuditLog
-    await AuditLog.create({
-      performedBy: req.user._id, // ID of the admin performing the action
-      entityId: invite._id, // ID of the invite
-      entity: "Invite", // Type of entity
-      action: "CREATE", // Action performed
-      details: `Invited user with email: ${email} and role: ${role}.`,
-    });
-
-    res
-      .status(200)
-      .json({ success: true, message: "Invitation sent successfully" });
+    res.status(200).json({ success: true, newUsers: count });
   } catch (error) {
-    logger.error("Invite User Error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error sending invitation",
-        error: error.message,
-      });
+    logger.error("Count New Users Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Invalid input. Please ensure all fields are filled out correctly and try again.",
+    });
+  }
+};
+
+/**
+ * @desc    Count returning users
+ * @route   GET /api/users/admin/users/count-returning
+ * @access  Private/Admin
+ */
+exports.countReturningUsers = async (req, res) => {
+  try {
+    // Define what constitutes a returning user
+    // For example, users who have logged in at least 2 times
+    const aggregation = [
+      { $match: { entity: "User", action: "LOGIN" } },
+      { $group: { _id: "$entityId", loginCount: { $sum: 1 } } },
+      { $match: { loginCount: { $gte: 2 } } },
+      { $count: "returningUsers" },
+    ];
+
+    const result = await AuditLog.aggregate(aggregation);
+    const returningUsers = result.length > 0 ? result[0].returningUsers : 0;
+
+    res.status(200).json({ success: true, returningUsers });
+  } catch (error) {
+    logger.error("Count Returning Users Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Invalid input. Please ensure all fields are filled out correctly and try again.",
+    });
+  }
+};
+/**
+ * @desc    Get metrics for a specific user
+ * @route   GET /api/users/admin/users/:id/metrics
+ * @access  Private/Admin
+ */
+exports.getUserMetrics = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    // Validate if the user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Example Metrics:
+    // 1. Number of products purchased
+    // 2. Login frequency
+
+    // Replace these with actual implementations based on your data models
+
+    // Example: Count of products purchased by the user
+    const productPurchasedCount = await ProductPurchase.countDocuments({ user: userId });
+
+    // Example: Count of logins from AuditLog
+    const loginFrequency = await AuditLog.countDocuments({ 
+      entityId: userId, 
+      entity: "User", 
+      action: "LOGIN" 
+    });
+
+    // You can add more metrics as needed
+
+    const metrics = {
+      productPurchasedCount,
+      loginFrequency,
+      // Add other metrics here
+    };
+
+    res.status(200).json({ success: true, metrics });
+  } catch (error) {
+    logger.error("Get User Metrics Error:", error);
+    res.status(500).json({ success: false, message: ERROR_CODES.SERVER_ERROR });
   }
 };

@@ -122,14 +122,8 @@ router.post(
 );
 
 // ============================
-// Routes
+// Count Routes
 // ============================
-
-/**
- * ============================
- * 1. Define Specific Routes First
- * ============================
- */
 
 /**
  * @route   GET /api/users/admin/users/count
@@ -156,6 +150,43 @@ router.get(
 );
 
 /**
+ * @route   GET /api/users/admin/users/count-new
+ * @desc    Get count of new users
+ * @access  Private/Admin
+ */
+router.get(
+  "/admin/users/count-new",
+  authMiddleware,
+  adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.MARKETING_MANAGER]),
+  [
+    query("days")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("Days must be a positive integer"),
+  ],
+  validateMiddleware,
+  userController.countNewUsers
+);
+
+/**
+ * @route   GET /api/users/admin/users/count-returning
+ * @desc    Get count of returning users
+ * @access  Private/Admin
+ */
+router.get(
+  "/admin/users/count-returning",
+  authMiddleware,
+  adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.MARKETING_MANAGER]),
+  // No additional validation required as per current controller logic
+  validateMiddleware,
+  userController.countReturningUsers
+);
+
+// ============================
+// Export Route
+// ============================
+
+/**
  * @route   GET /api/users/admin/users/export
  * @desc    Export user data in CSV format
  * @access  Private/Admin
@@ -166,6 +197,10 @@ router.get(
   adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.MARKETING_MANAGER]),
   userController.exportUsers
 );
+
+// ============================
+// Search Route
+// ============================
 
 /**
  * @route   GET /api/users/admin/users/search
@@ -207,11 +242,9 @@ router.get(
   userController.searchUsers
 );
 
-/**
- * ============================
- * 2. Define Parameterized Routes After Specific Routes
- * ============================
- */
+// ============================
+// Parameterized Routes
+// ============================
 
 /**
  * @route   POST /api/users/admin/users
@@ -323,7 +356,11 @@ router.patch(
   userController.changeUserStatus
 );
 
-// Bulk Update Users Route - Updated to expect userIds and actions
+/**
+ * @route   POST /api/users/admin/users/bulk-update
+ * @desc    Perform bulk updates on multiple users
+ * @access  Private/Admin
+ */
 router.post(
   "/admin/users/bulk-update",
   authMiddleware,
@@ -360,9 +397,9 @@ router.post(
   userController.bulkUpdateUsers
 );
 
-
-
-
+// ============================
+// Addresses Routes
+// ============================
 
 // Route: /api/users/addresses
 router
@@ -390,41 +427,20 @@ router.get(
   userController.getUserActivity
 );
 
-// Bulk Update Users Route - Updated to expect userIds and actions
-router.post(
-  "/admin/users/bulk-update",
+/**
+ * @route   GET /api/users/admin/users/:id/metrics
+ * @desc    Get metrics for a specific user
+ * @access  Private/Admin
+ */
+router.get(
+  "/admin/users/:id/metrics",
   authMiddleware,
   adminMiddleware([USER_ROLES.SUPER_ADMIN, USER_ROLES.MARKETING_MANAGER]),
   [
-    // Validate userIds
-    body("userIds")
-      .isArray({ min: 1 })
-      .withMessage("userIds must be a non-empty array"),
-    body("userIds.*")
-      .isMongoId()
-      .withMessage("Each user ID must be a valid MongoDB ID"),
-
-    // Validate actions
-    body("actions")
-      .isArray({ min: 1 })
-      .withMessage("actions must be a non-empty array"),
-    body("actions.*.action")
-      .isIn(['changeRole', 'changeStatus', 'deleteUsers'])
-      .withMessage("Invalid action type"),
-    body("actions.*.data").optional().isObject().withMessage("Data must be an object"),
-
-    // Conditional validations based on action type
-    body("actions.*.data.role")
-      .if(body("actions.*.action").equals("changeRole"))
-      .isIn(Object.values(USER_ROLES))
-      .withMessage("Invalid role"),
-    body("actions.*.data.isActive")
-      .if(body("actions.*.action").equals("changeStatus"))
-      .isBoolean()
-      .withMessage("isActive must be a boolean"),
+    param("id").isMongoId().withMessage("Invalid user ID"),
   ],
   validateMiddleware,
-  userController.bulkUpdateUsers
+  userController.getUserMetrics
 );
 
 

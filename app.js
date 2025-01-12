@@ -13,7 +13,7 @@ const logger = require('./utils/logger');
 const { uploadImage } = require('./services/cloudinaryService');
 
 // Middleware imports
-const rateLimitMiddleware = require('./middleware/rateLimitMiddleware').rateLimitMiddleware;
+// const rateLimitMiddleware = require('./middleware/rateLimitMiddleware').rateLimitMiddleware;
 const errorMiddleware = require('./middleware/errorMiddleware');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -73,7 +73,7 @@ app.use(json());
 app.use(urlencoded({ extended: true }));
 
 // Rate Limiting Middleware
-app.use(rateLimitMiddleware);
+// app.use(rateLimitMiddleware);
 
 // Logging Middleware
 app.use(morgan('combined', { stream: logger.stream }));

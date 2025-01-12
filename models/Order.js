@@ -102,6 +102,7 @@ const OrderSchema = new mongoose.Schema(
       transactionId: { type: String, default: null, trim: true },
       fee: { type: Number, default: 0, min: [0, 'Fee cannot be negative'] },
     },
+    cancellationReason: { type: String, default: null }, // Added for cancellation reason
   },
   {
     timestamps: true,

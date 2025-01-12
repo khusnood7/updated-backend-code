@@ -1,5 +1,6 @@
 // controllers/orderController.js
 
+const mongoose = require('mongoose'); // Added for ObjectId validation
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Coupon = require('../models/Coupon');
@@ -12,6 +13,7 @@ const { processPayment } = require('../services/paymentService');
 const { setCache, getCache, deleteCache } = require('../services/redisService');
 const crypto = require('crypto');
 const sendEmail = require('../services/emailService'); // Ensure the correct path
+const Joi = require('joi'); // **Added Import for Joi**
 
 // Encryption key for sensitive data
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'defaultEncryptionKey123456'; // Replace with a secure key in production
@@ -24,6 +26,15 @@ const encrypt = (text) => {
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
+};
+
+// Helper function to validate MongoDB ObjectId
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+// Helper function to capitalize the first letter of a string
+const capitalize = (s) => {
+  if (typeof s !== 'string') return '';
+  return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
 /**
@@ -133,7 +144,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
   }
 
   // Create order number
-  const orderNumber = `ORD${Date.now()}`;
+  const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   // Set initial status to 'pending'
   const order = await Order.create({
@@ -145,7 +156,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
     shippingAddress,
     billingAddress,
     status: 'pending', // Set to 'pending' initially
-    paymentStatus: paymentMethod.toLowerCase() === 'cod' || paymentMethod.toLowerCase() === 'cash_on_delivery' ? 'pending' : 'pending', // Payment status remains 'pending' until order is accepted
+    paymentStatus: ['cod', 'cash_on_delivery'].includes(paymentMethod.toLowerCase()) ? 'pending' : 'paid', // Updated assignment
     discount,
     couponCode: couponCode || null,
   });
@@ -362,7 +373,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
   // For 'cod' payments, no immediate stock deduction or processing is done
   // Payment status remains 'pending' until the admin accepts the order
 
-  // For online payments, payment is still 'pending' until admin accepts and processes the order
+  // For online payments, payment is still 'paid' if not 'cod' or 'cash_on_delivery'
   // You might want to integrate payment verification based on your payment gateway
 
   // Invalidate cache if necessary
@@ -372,7 +383,7 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
   res.status(201).json({
     success: true,
     data: order,
-    message: MESSAGES.ORDER.CREATE_SUCCESS,
+    message: MESSAGES.ORDER.CREATE_SUCCESS || 'Order created successfully.',
   });
 });
 
@@ -382,12 +393,23 @@ exports.createOrder = asyncHandler(async (req, res, next) => {
  * @access  Private/Admin
  */
 exports.acceptOrder = asyncHandler(async (req, res, next) => {
-  const order = await Order.findById(req.params.id)
+  const { id } = req.params;
+
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received: ${id}`);
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid order ID.',
+    });
+  }
+
+  const order = await Order.findById(id)
     .populate('customer', 'name email')
     .populate('items.product', 'title thumbnail variants');
 
   if (!order) {
-    logger.warn(`Order with ID ${req.params.id} not found.`);
+    logger.warn(`Order with ID ${id} not found.`);
     return res.status(404).json({
       success: false,
       message: MESSAGES.ORDER.ORDER_NOT_FOUND || 'Order not found.',
@@ -666,15 +688,25 @@ exports.acceptOrder = asyncHandler(async (req, res, next) => {
  * @access  Private/Admin/Order Manager
  */
 exports.updateOrderStatus = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
   const { status } = req.body;
 
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received: ${id}`);
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid order ID.',
+    });
+  }
+
   // Fetch the order and populate necessary fields
-  const order = await Order.findById(req.params.id)
+  const order = await Order.findById(id)
     .populate('customer', 'name email')
-    .populate('items.product', 'title thumbnail'); // Changed 'images' to 'thumbnail'
+    .populate('items.product', 'title thumbnail');
 
   if (!order) {
-    logger.warn(`Order with ID ${req.params.id} not found.`);
+    logger.warn(`Order with ID ${id} not found.`);
     return res.status(404).json({
       success: false,
       message: MESSAGES.ORDER.ORDER_NOT_FOUND || 'Order not found.',
@@ -692,7 +724,7 @@ exports.updateOrderStatus = asyncHandler(async (req, res, next) => {
   };
 
   if (!allowedTransitions[order.status].includes(status)) {
-    logger.warn(`Invalid status transition from ${order.status} to ${status} for Order ID ${req.params.id}.`);
+    logger.warn(`Invalid status transition from ${order.status} to ${status} for Order ID ${id}.`);
     return res.status(400).json({ success: false, message: 'Invalid status transition.' });
   }
 
@@ -936,13 +968,24 @@ exports.updateOrderStatus = asyncHandler(async (req, res, next) => {
  * @access  Private/Admin/Order Manager
  */
 exports.cancelOrder = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
   const { reason } = req.body;
 
-  const order = await Order.findById(req.params.id)
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received: ${id}`);
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid order ID.',
+    });
+  }
+
+  const order = await Order.findById(id)
     .populate('customer', 'name email')
     .populate('items.product', 'title thumbnail');
 
   if (!order) {
+    logger.warn(`Order with ID ${id} not found.`);
     return res.status(404).json({
       success: false,
       message: MESSAGES.ORDER.ORDER_NOT_FOUND || 'Order not found.',
@@ -958,26 +1001,34 @@ exports.cancelOrder = asyncHandler(async (req, res, next) => {
 
   // If the order is in 'processing' or beyond, restore stock
   if (['processing', 'shipped', 'delivered'].includes(order.status)) {
-    await Promise.all(
-      order.items.map(async (item) => {
-        const product = await Product.findById(item.product._id);
-        if (!product) {
-          throw new Error(`Product with ID ${item.product._id} not found.`);
-        }
+    try {
+      await Promise.all(
+        order.items.map(async (item) => {
+          const product = await Product.findById(item.product._id);
+          if (!product) {
+            throw new Error(`Product with ID ${item.product._id} not found.`);
+          }
 
-        if (!product.variants || !Array.isArray(product.variants)) {
-          throw new Error(`Product ${product.title} has invalid variants.`);
-        }
+          if (!product.variants || !Array.isArray(product.variants)) {
+            throw new Error(`Product ${product.title} has invalid variants.`);
+          }
 
-        const variant = product.variants.find(v => v.size.toLowerCase() === item.variant.toLowerCase());
-        if (!variant) {
-          throw new Error(`Variant ${item.variant} not found for product ${product.title}.`);
-        }
+          const variant = product.variants.find(v => v.size.toLowerCase() === item.variant.toLowerCase());
+          if (!variant) {
+            throw new Error(`Variant ${item.variant} not found for product ${product.title}.`);
+          }
 
-        variant.stock += item.quantity;
-        await product.save();
-      })
-    );
+          variant.stock += item.quantity;
+          await product.save();
+        })
+      );
+    } catch (stockError) {
+      logger.error(`Stock Restoration Error for Order ID ${order._id}: ${stockError.message}`);
+      return res.status(400).json({
+        success: false,
+        message: stockError.message || 'Error restoring stock.',
+      });
+    }
   }
 
   order.status = 'cancelled';
@@ -1185,7 +1236,11 @@ exports.getAllOrders = asyncHandler(async (req, res, next) => {
   }
 
   if (customer) {
-    filter.customer = customer;
+    if (isValidObjectId(customer)) {
+      filter.customer = customer;
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid customer ID.' });
+    }
   }
 
   if (dateFrom || dateTo) {
@@ -1277,12 +1332,23 @@ exports.getMyOrders = asyncHandler(async (req, res, next) => {
  * @access  Private/Admin/Order Manager/Customer
  */
 exports.getOrderById = asyncHandler(async (req, res, next) => {
-  const order = await Order.findById(req.params.id)
+  const { id } = req.params;
+
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received: ${id}`);
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid order ID.',
+    });
+  }
+
+  const order = await Order.findById(id)
     .populate('customer', 'name email')
     .populate('items.product', 'title thumbnail'); // Changed 'images' to 'thumbnail'
 
   if (!order) {
-    logger.warn(`Order with ID ${req.params.id} not found.`);
+    logger.warn(`Order with ID ${id} not found.`);
     return res.status(404).json({
       success: false,
       message: MESSAGES.ORDER.ORDER_NOT_FOUND || 'Order not found.',
@@ -1303,4 +1369,961 @@ exports.getOrderById = asyncHandler(async (req, res, next) => {
     data: order,
     message: MESSAGES.ORDER.FETCH_SUCCESS || 'Order fetched successfully.',
   });
+});
+
+// src/controllers/orderController.js
+
+/**
+ * @desc    Get Order Metrics
+ * @route   GET /api/orders/metrics
+ * @access  Private/Admin/Order Manager/Analytics Viewer
+ */
+exports.getOrderMetrics = asyncHandler(async (req, res, next) => {
+  const { dateFrom, dateTo } = req.query;
+
+  let match = {};
+
+  // Filter by date range if provided
+  if (dateFrom || dateTo) {
+    match.createdAt = {};
+    if (dateFrom) match.createdAt.$gte = new Date(dateFrom);
+    if (dateTo) match.createdAt.$lte = new Date(dateTo);
+  }
+
+  // Main aggregation pipeline
+  const pipeline = [
+    { $match: match },
+    {
+      $facet: {
+        // 1) Total Orders
+        totalOrders: [{ $count: 'count' }],
+
+        // 2) Repeat Orders
+        repeatOrders: [
+          {
+            $group: {
+              _id: '$customer',
+              orderCount: { $sum: 1 },
+            },
+          },
+          { $match: { orderCount: { $gt: 1 } } },
+          { $count: 'count' },
+        ],
+
+        // 3) New Orders
+        newOrders: [
+          {
+            $group: {
+              _id: '$customer',
+              orderCount: { $sum: 1 },
+            },
+          },
+          { $match: { orderCount: { $eq: 1 } } }, // First-time customers
+          { $count: 'count' },
+        ],
+
+        // 4) Abandoned Orders
+        abandonedOrders: [
+          { $match: { status: 'abandoned' } },
+          { $count: 'count' },
+        ],
+
+        // 5) Gross Merchandise Value (GMV)
+        grossRevenue: [
+          {
+            $group: {
+              _id: null,
+              totalGMV: { $sum: '$totalAmount' },
+            },
+          },
+        ],
+
+        // 6) Net Revenue
+        netRevenue: [
+          {
+            $group: {
+              _id: null,
+              totalNetRevenue: { $sum: '$totalAmount' },
+              totalDiscount: { $sum: '$discount' },
+              totalRefunds: {
+                $sum: {
+                  $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$totalAmount', 0],
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              totalNetRevenue: {
+                $subtract: ['$totalNetRevenue', { $add: ['$totalDiscount', '$totalRefunds'] }],
+              },
+            },
+          },
+        ],
+
+        // 7) Average Order Value (AOV)
+        averageOrderValue: [
+          {
+            $group: {
+              _id: null,
+              avgOrderValue: { $avg: '$totalAmount' },
+            },
+          },
+        ],
+
+        // 8) On-Time Delivery Rate
+        onTimeDelivery: [
+          {
+            $match: {
+              status: 'delivered',
+              $expr: { $lte: ['$updatedAt', '$promisedDeliveryDate'] },
+            },
+          },
+          { $count: 'count' },
+        ],
+
+        // 9) Order Processing Time
+        orderProcessingTime: [
+          {
+            $project: {
+              processingTime: {
+                $divide: [
+                  {
+                    $subtract: [
+                      { $arrayElemAt: ['$orderHistory.updatedAt', 1] }, // Assuming second entry is 'processing'
+                      '$createdAt',
+                    ],
+                  },
+                  1000 * 60 * 60, // Convert milliseconds to hours
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              avgProcessingTime: { $avg: '$processingTime' },
+            },
+          },
+        ],
+
+        // 10) Order Accuracy Rate
+        orderAccuracy: [
+          {
+            $match: { isAccurate: true },
+          },
+          { $count: 'count' },
+          {
+            $lookup: {
+              from: 'orders',
+              pipeline: [{ $match: match }, { $count: 'total' }],
+              as: 'totalOrders',
+            },
+          },
+          {
+            $addFields: {
+              accuracyRate: {
+                $multiply: [
+                  { $divide: ['$count', { $arrayElemAt: ['$totalOrders.count', 0] || 1 }] },
+                  100,
+                ],
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              accuracyRate: 1,
+            },
+          },
+        ],
+
+        // 11) Order Frequency Rate (OFR)
+        orderFrequencyRate: [
+          {
+            $group: {
+              _id: '$customer',
+              orderCount: { $sum: 1 },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              averageOrderFrequency: { $avg: '$orderCount' },
+            },
+          },
+        ],
+
+        // 12) Repeat Purchase Rate (RPR)
+        repeatPurchaseRate: [
+          {
+            $group: {
+              _id: '$customer',
+              orderCount: { $sum: 1 },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalCustomers: { $sum: 1 },
+              repeatCustomers: {
+                $sum: {
+                  $cond: [{ $gt: ['$orderCount', 1] }, 1, 0],
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              rpr: {
+                $multiply: [
+                  { $divide: ['$repeatCustomers', '$totalCustomers'] },
+                  100,
+                ],
+              },
+            },
+          },
+        ],
+
+        // 13) Order Abandonment Rate
+        orderAbandonmentRate: [
+          {
+            $group: {
+              _id: null,
+              totalAbandoned: {
+                $sum: { $cond: [{ $eq: ['$status', 'abandoned'] }, 1, 0] },
+              },
+              totalCarts: { $sum: 1 }, // Assuming each order attempt is a cart
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              abandonmentRate: {
+                $multiply: [
+                  { $divide: ['$totalAbandoned', '$totalCarts'] },
+                  100,
+                ],
+              },
+            },
+          },
+        ],
+
+        // 14) Shipping Cost per Order
+        shippingCostPerOrder: [
+          {
+            $group: {
+              _id: null,
+              avgShippingCost: { $avg: '$shippingCost' },
+            },
+          },
+        ],
+
+        // 15) Orders with Free Shipping
+        ordersWithFreeShipping: [
+          {
+            $match: { shippingCost: 0 },
+          },
+          { $count: 'count' },
+        ],
+
+        // 16) Top Selling Products
+        topSellingProducts: [
+          { $unwind: '$items' },
+          {
+            $group: {
+              _id: '$items.product',
+              totalSold: { $sum: '$items.quantity' },
+            },
+          },
+          { $sort: { totalSold: -1 } },
+          { $limit: 5 },
+          {
+            $lookup: {
+              from: 'products',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'product',
+            },
+          },
+          { $unwind: '$product' },
+          {
+            $project: {
+              _id: 0,
+              productId: '$product._id',
+              title: '$product.title',
+              totalSold: 1,
+            },
+          },
+        ],
+
+        // 17) Feedback Metrics (CSAT & NPS)
+        feedbackMetrics: [
+          {
+            $lookup: {
+              from: 'feedbacks',
+              localField: '_id',
+              foreignField: 'order',
+              as: 'feedback',
+            },
+          },
+          { $unwind: { path: '$feedback', preserveNullAndEmptyArrays: true } },
+          {
+            $group: {
+              _id: null,
+              totalFeedbacks: {
+                $sum: { $cond: [{ $ifNull: ['$feedback', false] }, 1, 0] },
+              },
+              averageCSAT: { $avg: '$feedback.rating' },
+              averageNPS: { $avg: '$feedback.nps' },
+            },
+          },
+        ],
+
+        // 18) Marketing Metrics (CPO)
+        marketingMetrics: [
+          {
+            $lookup: {
+              from: 'marketingspends',
+              localField: '_id',
+              foreignField: '_id', // Assuming marketing spend is tracked globally or per campaign
+              as: 'marketing',
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalMarketingSpend: { $sum: '$marketing.amount' },
+            },
+          },
+        ],
+
+        // 19) Revenue Over Time (Daily Gross Revenue)
+        revenueOverTime: [
+          {
+            $group: {
+              _id: {
+                year: { $year: '$createdAt' },
+                month: { $month: '$createdAt' },
+                day: { $dayOfMonth: '$createdAt' },
+              },
+              grossRevenue: { $sum: '$totalAmount' },
+            },
+          },
+          {
+            $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 },
+          },
+          {
+            $project: {
+              _id: 0,
+              date: {
+                $dateToString: {
+                  format: '%Y-%m-%d',
+                  date: {
+                    $dateFromParts: {
+                      year: '$_id.year',
+                      month: '$_id.month',
+                      day: '$_id.day',
+                    },
+                  },
+                },
+              },
+              grossRevenue: 1,
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  try {
+    const metrics = await Order.aggregate(pipeline);
+
+    // Extract Marketing Spend
+    const totalMarketingSpend = metrics[0].marketingMetrics[0]
+      ? metrics[0].marketingMetrics[0].totalMarketingSpend
+      : 0;
+
+    // Extract Total Orders
+    const totalOrders = metrics[0].totalOrders[0] ? metrics[0].totalOrders[0].count : 0;
+
+    // Calculate Cost Per Order (CPO)
+    const costPerOrder = totalOrders ? totalMarketingSpend / totalOrders : 0;
+
+    // Extract Feedback Metrics
+    const totalFeedbacks = metrics[0].feedbackMetrics[0]
+      ? metrics[0].feedbackMetrics[0].totalFeedbacks
+      : 0;
+    const averageCSAT = metrics[0].feedbackMetrics[0]
+      ? metrics[0].feedbackMetrics[0].averageCSAT
+      : 0;
+    const averageNPS = metrics[0].feedbackMetrics[0]
+      ? metrics[0].feedbackMetrics[0].averageNPS
+      : 0;
+
+    const response = {
+      // Order Volume Metrics
+      totalOrders,
+      repeatOrders: metrics[0].repeatOrders[0] ? metrics[0].repeatOrders[0].count : 0,
+      newOrders: metrics[0].newOrders[0] ? metrics[0].newOrders[0].count : 0,
+      abandonedOrders: metrics[0].abandonedOrders[0] ? metrics[0].abandonedOrders[0].count : 0,
+
+      // Revenue Metrics
+      grossRevenue: metrics[0].grossRevenue[0] ? metrics[0].grossRevenue[0].totalGMV : 0,
+      netRevenue: metrics[0].netRevenue[0] ? metrics[0].netRevenue[0].totalNetRevenue : 0,
+      averageOrderValue: metrics[0].averageOrderValue[0]
+        ? metrics[0].averageOrderValue[0].avgOrderValue
+        : 0,
+
+      // Fulfillment Metrics
+      onTimeDeliveryRate: metrics[0].onTimeDelivery[0]
+        ? (metrics[0].onTimeDelivery[0].count / (totalOrders || 1)) * 100
+        : 0,
+      averageProcessingTime: metrics[0].orderProcessingTime[0]
+        ? metrics[0].orderProcessingTime[0].avgProcessingTime
+        : 0, // in hours
+      orderAccuracyRate: metrics[0].orderAccuracy[0]
+        ? metrics[0].orderAccuracy[0].accuracyRate
+        : 100, // Default to 100% if no data
+
+      // Customer Behavior Metrics
+      orderFrequencyRate: metrics[0].orderFrequencyRate[0]
+        ? metrics[0].orderFrequencyRate[0].averageOrderFrequency
+        : 0,
+      repeatPurchaseRate: metrics[0].repeatPurchaseRate[0]
+        ? metrics[0].repeatPurchaseRate[0].rpr
+        : 0,
+      orderAbandonmentRate: metrics[0].orderAbandonmentRate[0]
+        ? metrics[0].orderAbandonmentRate[0].abandonmentRate
+        : 0,
+
+      // Shipping Metrics
+      averageShippingCostPerOrder: metrics[0].shippingCostPerOrder[0]
+        ? metrics[0].shippingCostPerOrder[0].avgShippingCost
+        : 0,
+      ordersWithFreeShipping: metrics[0].ordersWithFreeShipping[0]
+        ? metrics[0].ordersWithFreeShipping[0].count
+        : 0,
+
+      // Additional Metrics
+      topSellingProducts: metrics[0].topSellingProducts,
+
+      // Feedback Metrics
+      totalFeedbacks,
+      averageCSAT,
+      averageNPS,
+
+      // Marketing Metrics
+      totalMarketingSpend,
+      costPerOrder,
+
+      // Revenue Over Time
+      revenueOverTime: metrics[0].revenueOverTime,
+
+      message: 'Order metrics fetched successfully.',
+    };
+
+    res.status(200).json({
+      success: true,
+      data: response,
+    });
+  } catch (error) {
+    logger.error(`Error fetching order metrics: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch order metrics.',
+    });
+  }
+});
+
+
+/**
+ * @desc    Update tracking details for shipped orders
+ * @route   PUT /api/orders/:id/tracking
+ * @access  Private/Admin/Order Manager
+ */
+exports.updateTracking = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
+  const { trackingId, carrier } = req.body;
+
+  // Validate input using Joi
+  const schema = Joi.object({
+    trackingId: Joi.string().required(),
+    carrier: Joi.string().required(),
+  });
+
+  const { error } = schema.validate({ trackingId, carrier });
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
+
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received for tracking update: ${id}`);
+    return res.status(400).json({ success: false, message: 'Invalid order ID.' });
+  }
+
+  const order = await Order.findById(id)
+    .populate('customer', 'name email');
+
+  if (!order) {
+    logger.warn(`Order with ID ${id} not found for tracking update.`);
+    return res.status(404).json({ success: false, message: 'Order not found.' });
+  }
+
+  // Ensure the order has been shipped
+  if (order.status !== 'shipped') {
+    return res.status(400).json({ success: false, message: 'Only shipped orders can have tracking details updated.' });
+  }
+
+  // Update tracking details
+  order.trackingDetails = {
+    trackingId,
+    carrier,
+    updatedAt: new Date(),
+  };
+  await order.save();
+
+  // Notify the customer about tracking update
+  try {
+    const emailHtml = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Order Tracking Updated</title>
+      <style>
+        /* Add your email styles here */
+      </style>
+    </head>
+    <body>
+      <p>Hi ${order.customer.name},</p>
+      <p>Your order <strong>${order.orderNumber}</strong> has updated tracking information.</p>
+      <p><strong>Carrier:</strong> ${carrier}</p>
+      <p><strong>Tracking ID:</strong> ${trackingId}</p>
+      <p>You can track your shipment <a href="https://www.${carrier.toLowerCase()}.com/track/${trackingId}">here</a>.</p>
+      <p>Thank you for shopping with us.</p>
+    </body>
+    </html>
+    `;
+
+    await sendEmail({
+      email: order.customer.email,
+      subject: 'Your Order Tracking Information Updated - 10X Formulas',
+      message: `Hi ${order.customer.name}, your order tracking information has been updated.`,
+      html: emailHtml,
+    });
+
+    logger.info(`Tracking update email sent to ${order.customer.email} for Order ID ${order._id}`);
+  } catch (emailError) {
+    logger.error(`Failed to send tracking update email to ${order.customer.email}: ${emailError.message}`);
+    // Proceed without failing the tracking update
+  }
+
+  res.status(200).json({
+    success: true,
+    data: order.trackingDetails,
+    message: 'Tracking details updated successfully.',
+  });
+});
+
+
+/**
+ * @desc    Allow customers to request a return
+ * @route   POST /api/orders/:id/return
+ * @access  Private/Customer
+ */
+exports.returnOrder = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
+  const { items, reason } = req.body;
+
+  // Validate input using Joi
+  const schema = Joi.object({
+    items: Joi.array().items(
+      Joi.object({
+        productId: Joi.string().required(),
+        quantity: Joi.number().positive().required(),
+      })
+    ).min(1).required(),
+    reason: Joi.string().max(500).optional(),
+  });
+
+  const { error } = schema.validate({ items, reason });
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
+
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received for return: ${id}`);
+    return res.status(400).json({ success: false, message: 'Invalid order ID.' });
+  }
+
+  const order = await Order.findById(id)
+    .populate('customer', 'name email')
+    .populate('items.product', 'title price');
+
+  if (!order) {
+    logger.warn(`Order with ID ${id} not found for return.`);
+    return res.status(404).json({ success: false, message: 'Order not found.' });
+  }
+
+  // Check if the order is eligible for return
+  if (!['delivered'].includes(order.status)) {
+    return res.status(400).json({ success: false, message: 'Only delivered orders can be returned.' });
+  }
+
+  // Check if the return request is within the return window (e.g., 30 days)
+  const returnWindowDays = 30;
+  const orderDate = new Date(order.createdAt);
+  const currentDate = new Date();
+  const diffTime = Math.abs(currentDate - orderDate);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays > returnWindowDays) {
+    return res.status(400).json({ success: false, message: `Return window of ${returnWindowDays} days has expired.` });
+  }
+
+  // Validate that the items being returned are part of the order
+  for (const returnItem of items) {
+    const orderedItem = order.items.find(
+      (item) => String(item.product._id) === String(returnItem.productId)
+    );
+    if (!orderedItem) {
+      return res.status(400).json({ success: false, message: `Product with ID ${returnItem.productId} is not part of this order.` });
+    }
+    if (returnItem.quantity > orderedItem.quantity - (orderedItem.returned || 0)) {
+      return res.status(400).json({ success: false, message: `Return quantity for product ${orderedItem.product.title} exceeds the purchased quantity.` });
+    }
+  }
+
+  // Create a return request (Assuming you have a Return model)
+  const returnRequest = await Return.create({
+    order: order._id,
+    customer: order.customer._id,
+    items,
+    reason: reason || 'No reason provided.',
+    status: 'pending',
+    requestedAt: new Date(),
+  });
+
+  // Notify Admins about the return request (Assuming you have a way to get admin emails)
+  try {
+    const adminEmails = await getAdminEmails(); // Implement this function based on your admin setup
+
+    const emailHtml = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Return Request</title>
+      <style>
+        /* Add your email styles here */
+      </style>
+    </head>
+    <body>
+      <p>Hi Admin,</p>
+      <p>A customer has requested a return for order <strong>${order.orderNumber}</strong>.</p>
+      <p><strong>Customer:</strong> ${order.customer.name} (${order.customer.email})</p>
+      <p><strong>Items to Return:</strong></p>
+      <ul>
+        ${items.map(item => `<li>Product ID: ${item.productId}, Quantity: ${item.quantity}</li>`).join('')}
+      </ul>
+      <p><strong>Reason:</strong> ${reason || 'No reason provided.'}</p>
+      <p>Please review the return request.</p>
+    </body>
+    </html>
+    `;
+
+    await sendEmail({
+      email: adminEmails,
+      subject: 'New Return Request - 10X Formulas',
+      message: `A new return request has been submitted for order ${order.orderNumber}.`,
+      html: emailHtml,
+    });
+
+    logger.info(`Return request email sent to admins for Order ID ${order._id}`);
+  } catch (emailError) {
+    logger.error(`Failed to send return request email for Order ID ${order._id}: ${emailError.message}`);
+    // Proceed without failing the return request creation
+  }
+
+  res.status(201).json({
+    success: true,
+    data: returnRequest,
+    message: 'Return request submitted successfully.',
+  });
+});
+
+/**
+ * @desc    Process a partial/full refund for a delivered order
+ * @route   POST /api/orders/:id/refund
+ * @access  Private/Admin/Order Manager
+ */
+exports.refundOrder = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
+  const { amount, reason } = req.body;
+
+  // Validate input using Joi
+  const schema = Joi.object({
+    amount: Joi.number().positive().required(),
+    reason: Joi.string().max(500).optional(),
+  });
+
+  const { error } = schema.validate({ amount, reason });
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
+
+  // Validate the order ID
+  if (!isValidObjectId(id)) {
+    logger.warn(`Invalid order ID received for refund: ${id}`);
+    return res.status(400).json({ success: false, message: 'Invalid order ID.' });
+  }
+
+  const order = await Order.findById(id)
+    .populate('customer', 'name email')
+    .populate('items.product', 'title price');
+
+  if (!order) {
+    logger.warn(`Order with ID ${id} not found for refund.`);
+    return res.status(404).json({ success: false, message: 'Order not found.' });
+  }
+
+  // Check if the order is eligible for refund
+  if (!['delivered', 'returned'].includes(order.status)) {
+    return res.status(400).json({ success: false, message: 'Only delivered or returned orders can be refunded.' });
+  }
+
+  // Calculate the refundable amount
+  const refundableAmount = order.totalAmount - order.totalRefunded;
+  if (amount > refundableAmount) {
+    return res.status(400).json({ success: false, message: `Refund amount exceeds refundable limit of $${refundableAmount.toFixed(2)}.` });
+  }
+
+  // Process the refund via payment gateway
+  const refundResponse = await processPaymentRefund(order.paymentTransactionId, amount);
+
+  if (!refundResponse.success) {
+    logger.error(`Refund processing failed for Order ID ${id}: ${refundResponse.message}`);
+    return res.status(500).json({ success: false, message: 'Refund processing failed.' });
+  }
+
+  // Update the order's refunded amount
+  order.totalRefunded += amount;
+  if (order.totalRefunded >= order.totalAmount) {
+    order.paymentStatus = 'refunded';
+    order.status = 'refunded';
+  }
+  await order.save();
+
+  // Create a refund record
+  const refund = await Refund.create({
+    order: order._id,
+    amount,
+    reason: reason || 'No reason provided.',
+    refundedAt: new Date(),
+    transactionId: refundResponse.data.id, // Assuming the refund ID from the gateway
+  });
+
+  // Send Refund Confirmation Email
+  try {
+    const emailHtml = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Refund Processed</title>
+      <style>
+        /* Add your email styles here */
+      </style>
+    </head>
+    <body>
+      <p>Hi ${order.customer.name},</p>
+      <p>Your refund for order <strong>${order.orderNumber}</strong> has been processed.</p>
+      <p><strong>Amount Refunded:</strong> $${amount.toFixed(2)}</p>
+      <p><strong>Reason:</strong> ${reason || 'No reason provided.'}</p>
+      <p>Thank you for shopping with us.</p>
+    </body>
+    </html>
+    `;
+
+    await sendEmail({
+      email: order.customer.email,
+      subject: 'Your Refund Has Been Processed - 10X Formulas',
+      message: `Hi ${order.customer.name}, your refund has been processed.`,
+      html: emailHtml,
+    });
+
+    logger.info(`Refund confirmation email sent to ${order.customer.email}`);
+  } catch (emailError) {
+    logger.error(`Failed to send refund confirmation email to ${order.customer.email}: ${emailError.message}`);
+    // Proceed without failing the refund process
+  }
+
+  res.status(200).json({
+    success: true,
+    data: refund,
+    message: 'Refund processed successfully.',
+  });
+});
+
+// Helper function to process refunds via payment gateway (Stripe example)
+async function processPaymentRefund(transactionId, amount) {
+  try {
+    // Replace with your payment gateway's refund logic
+    const refund = await stripe.refunds.create({
+      charge: transactionId,
+      amount: Math.round(amount * 100), // amount in cents
+    });
+    return { success: true, data: refund };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+
+/**
+ * @desc    Allow bulk status updates for orders
+ * @route   PUT /api/orders/bulk-update
+ * @access  Private/Admin/Order Manager
+ */
+exports.bulkUpdateOrders = asyncHandler(async (req, res, next) => {
+  const { orderIds, status } = req.body;
+
+  // Validate input using Joi
+  const schema = Joi.object({
+    orderIds: Joi.array().items(Joi.string().required()).min(1).required(),
+    status: Joi.string().valid('pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded').required(),
+  });
+
+  const { error } = schema.validate({ orderIds, status });
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
+
+  // Validate each order ID
+  const invalidIds = orderIds.filter(id => !isValidObjectId(id));
+  if (invalidIds.length > 0) {
+    return res.status(400).json({ success: false, message: `Invalid order IDs: ${invalidIds.join(', ')}` });
+  }
+
+  // Define allowed status transitions
+  const allowedTransitions = {
+    pending: ['processing', 'shipped', 'delivered', 'cancelled'],
+    processing: ['shipped', 'delivered', 'cancelled'],
+    shipped: ['delivered', 'refunded'],
+    delivered: ['refunded'],
+    cancelled: [],
+    refunded: [],
+  };
+
+  // Fetch all orders to be updated
+  const orders = await Order.find({ _id: { $in: orderIds } })
+    .populate('customer', 'name email')
+    .populate('items.product', 'title price');
+
+  // Check allowed transitions
+  const invalidTransitions = orders.filter(order => !allowedTransitions[order.status].includes(status));
+  if (invalidTransitions.length > 0) {
+    const invalidOrderNumbers = invalidTransitions.map(order => order.orderNumber).join(', ');
+    return res.status(400).json({ success: false, message: `Invalid status transition for orders: ${invalidOrderNumbers}` });
+  }
+
+  // Update each order
+  const updatedOrders = [];
+  for (const order of orders) {
+    order.status = status;
+
+    // Handle specific status updates if needed
+    if (status === 'shipped') {
+      order.shippingDate = new Date();
+      // Optionally, set tracking details if provided
+    } else if (status === 'delivered') {
+      order.deliveryDate = new Date();
+    }
+
+    await order.save();
+    updatedOrders.push(order);
+
+    // Send notification emails as necessary
+    try {
+      const emailHtml = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>Order Status Updated</title>
+        <style>
+          /* Add your email styles here */
+        </style>
+      </head>
+      <body>
+        <p>Hi ${order.customer.name},</p>
+        <p>Your order <strong>${order.orderNumber}</strong> has been updated to status <strong>${capitalize(status)}</strong>.</p>
+        <p>Thank you for shopping with us.</p>
+      </body>
+      </html>
+      `;
+
+      await sendEmail({
+        email: order.customer.email,
+        subject: `Your Order Status Updated to ${capitalize(status)} - 10X Formulas`,
+        message: `Hi ${order.customer.name}, your order status has been updated to ${status}.`,
+        html: emailHtml,
+      });
+
+      logger.info(`Bulk update email sent to ${order.customer.email} for Order ID ${order._id}`);
+    } catch (emailError) {
+      logger.error(`Failed to send bulk update email to ${order.customer.email}: ${emailError.message}`);
+      // Proceed without failing the entire bulk update
+    }
+  }
+
+  res.status(200).json({
+    success: true,
+    data: updatedOrders,
+    message: 'Bulk order status updated successfully.',
+  });
+});
+
+/**
+ * @desc    Fetch cached order metrics or trigger recomputation
+ * @route   GET /api/orders/metrics-cache
+ * @access  Private/Admin/Order Manager/Analytics Viewer
+ */
+exports.getMetricsCache = asyncHandler(async (req, res, next) => {
+  const { dateFrom, dateTo } = req.query;
+  const cacheKey = `order_metrics_${dateFrom || 'all'}_${dateTo || 'all'}`;
+
+  // Try fetching from cache
+  const cachedMetrics = await getCache(cacheKey);
+  if (cachedMetrics) {
+    return res.status(200).json({
+      success: true,
+      data: JSON.parse(cachedMetrics),
+      message: 'Order metrics fetched from cache.',
+    });
+  }
+
+  // If not cached, compute metrics
+  try {
+    // Reuse the existing getOrderMetrics function logic
+    const metrics = await exports.getOrderMetrics(req, res, next);
+
+    // Cache the metrics with an expiration time (e.g., 1 hour)
+    await setCache(cacheKey, JSON.stringify(metrics.data), 3600); // 3600 seconds = 1 hour
+
+    res.status(200).json({
+      success: true,
+      data: metrics.data,
+      message: 'Order metrics fetched and cached successfully.',
+    });
+  } catch (error) {
+    logger.error(`Error fetching order metrics for cache: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch order metrics.',
+    });
+  }
 });
